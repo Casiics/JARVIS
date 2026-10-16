@@ -70,3 +70,11 @@ def test_invalid_event_is_rejected() -> None:
     machine, _ = _machine()
     with pytest.raises(InvalidTransition):
         machine.apply(Task(domain=Domain.CORE, trace_id="t"), Event.EXECUTED)
+
+
+def test_failed_deterministic_step_escalates_and_is_audited() -> None:
+    machine, log = _machine()
+    task = machine.apply(Task(domain=Domain.CONTENT, trace_id="t"), Event.START)
+    task = machine.apply(task, Event.STEP_FAILED)
+    assert task.state is TaskState.ESCALATED
+    assert log[-1].decision.value == "escalate"

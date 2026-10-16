@@ -1,0 +1,17 @@
+# Sandbox image for reel download (yt-dlp) and media extraction (ffmpeg).
+# Runs read-only, as nobody, with all capabilities dropped (see mod_content.reel.sandbox).
+# Instagram changes often: keep YTDLP_VERSION current (Renovate) when downloads start failing.
+FROM python:3.12.11-slim-bookworm
+
+ARG YTDLP_VERSION=2026.8.19
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir "yt-dlp==${YTDLP_VERSION}"
+
+COPY reel_media.py /opt/jarvis/reel_media.py
+RUN printf '#!/bin/sh\nexec python3 /opt/jarvis/reel_media.py "$@"\n' > /usr/local/bin/reel-media \
+ && chmod 0555 /usr/local/bin/reel-media /opt/jarvis/reel_media.py
+
+USER 65534:65534
+WORKDIR /tmp

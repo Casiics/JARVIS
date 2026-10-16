@@ -10,7 +10,8 @@ Four security domains share one platform but never share data, credentials or ne
 
 ## Status
 
-Phase 1 (foundation): core contracts, boundary policy, action gate, model routing policy, task state machine, hash-chained audit log, per-domain secrets and data stores. No agents run yet.
+- Phase 1 (foundation), done: core contracts, boundary policy, action gate, model routing policy, task state machine, hash-chained audit log, per-domain secrets and data stores.
+- Phase 2 (reel pipeline), implemented: sandboxed download and media extraction, local transcription and keyframe reading, a quarantined extraction worker without tools, Tier 0b gate, follow-up proposals through the boundary policy, cost and audit report. See [`docs/runbooks/reel-pipeline.md`](docs/runbooks/reel-pipeline.md). The exit criterion (20 real reels) needs a run on the workstation.
 
 ## Quick start
 
