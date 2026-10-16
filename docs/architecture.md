@@ -108,6 +108,12 @@ Rules:
 - **Budget per task and per domain.** The circuit breaker applies globally (2.50 EUR/h, 15 EUR/day) and per domain; the private domain has a cloud budget of zero.
 - **Every transition is audited.**
 
+Implementation (runbook: [`runbooks/orchestrator.md`](runbooks/orchestrator.md)):
+
+- **Core orchestrator service** (`core/jarvis_core/orchestrator/service.py`): the task router maps a typed goal to the one domain that may do it, sends the single boundary event the flow matrix allows, and tracks the task from the domain's metadata-only `TaskMetadata` reports. Domains that stay silent past a deadline (restarted by every report) are escalated. Every change is audited and published as telemetry to the deck (`/ws/telemetry`, `/api/tasks`). It never calls a model and never reads domain data. Today the only goal kind is a reel (core to content), because `ReelSubmitted` is the only task event the flow matrix allows; further kinds need a new event and a human change to `policy/flows.py`.
+- **Generic loop** (`core/jarvis_core/orchestrator/loop.py`): worker attempt, Tier 0b gate against the acceptance schema fixed up front, supervisor QA, at most four attempts, per-task budget, task-token check before every model turn, action proposals parked in `AWAITING_ACTION`. Domains run it in their own process.
+- **Agent runtimes** (`core/jarvis_core/agents/`): the loop talks to models only through an `AgentRuntime`. `GatewayRuntime` makes one call through the inference gateway; `HermesRuntime` runs Hermes Agent one-shot with a task-scoped, OpenAI-compatible loopback endpoint as its only provider, no toolsets and a scrubbed environment, so Hermes is held to the same routing, budget and audit as every other caller.
+
 ## 5. Domains and boundaries
 
 ### 5.1 Data classification
@@ -140,6 +146,7 @@ Missing or unknown labels are treated as `PRIVATE`. Anything originating in the 
 | Core → any domain | Yes | Signed task token |
 | Core → content | Yes | `ReelSubmitted` (canonical reel link and task id) when the owner submits a reel in the deck; content reports back with `TaskMetadata` only |
 | Any domain → core | Yes | Result object, audit entry, metadata-only telemetry |
+| Content ↔ core (deck review) | Yes, PUBLIC/INTERNAL only | `ContextReviewRequested` (bounded summary of an uncertain curation decision) to the deck; the owner's `ContextReviewDecided` goes back and content applies it to its own store. Own mailbox root `context-review/` |
 | Content → trading | As proposal | `TradingIdeaProposed` into the trading inbox |
 | Content → private | As proposal | `LifeTipProposed` into the private inbox |
 | Private → anywhere except core metadata | No | Only by single, step-up approved exception |
@@ -163,6 +170,17 @@ Missing or unknown labels are treated as `PRIVATE`. Anything originating in the 
 3. Locally, Faster-Whisper transcribes and the vision model reads keyframes.
 4. A quarantined worker without tools builds a `ReelKnowledgeArtifact`; Tier 0b validates it. It carries the `external_content` taint.
 5. Depending on its category it becomes a content template, or a proposal in the trading or private inbox. Skill candidates go to core's self-improvement flow as a PR.
+
+### 6.2a Context curation (every domain, starting with content)
+
+What enters a domain's long-term context passes four deterministic stages (`jarvis_core.curation`), run by each domain on its own data:
+
+1. **Collect**: domain sources yield `CollectedItem`s with origin domain, classification (missing means `PRIVATE`) and taint. Items from another domain or labelled `SECRET` are refused; known items are skipped.
+2. **Consolidate**: exact duplicates (same content hash or source) and near duplicates (token similarity) are clustered and merged into one `Digest`; facts and sources are unioned.
+3. **Prepare**: the digest gets a category from the domain's YAML configuration, is compared with that category's stored entries and receives a `DecisionBrief`: store, merge or discard, with confidence and reasons.
+4. **Decide**: plain code applies the brief. Confident proposals are stored or merged automatically, weak ones discarded; flagged, over-classified or uncertain ones wait for the owner's review.
+
+No stage calls a model. Every stage writes ids and hashes to the audit chain. Open reviews can be decided in the deck (section 5.3); material above INTERNAL stays a terminal review. Curated entries stay in the domain's own store; nothing is shared across domains. See `docs/runbooks/context-curation.md`.
 
 ### 6.3 Trading idea to order
 
@@ -268,6 +286,8 @@ The semantic cache is per domain and never stores `CONFIDENTIAL`, `PRIVATE` or `
 
 The dashboard observes and approves; it is not a privileged control channel. It talks only to the API gateway. Telemetry events carry task id, domain, node, state, duration, cost, model class and error class, never prompts, outputs or raw data. Views: live DAG, approval deck, FinOps, trading cockpit with kill switch, audit explorer, private view (metadata only by default). Details are in the dashboard concept.
 
+Implemented: the **Agenten** view (`apps/deck/src/pages/Agents.tsx`) shows the orchestrator's tasks live from `/api/tasks` and `/ws/telemetry`: a constellation of the orchestrator and the worker domains, each task's stage in the loop, escalations with a plain-language cause, today's model spend, and a one-click retry for failed reels. The top bar counts escalations of the last 24 hours.
+
 ## 10. Deployment and operations
 
 - **Workstation**: `scripts/secrets-unpack.sh`, then `docker compose -f docker/docker-compose.yml up -d`.
@@ -294,3 +314,5 @@ Each phase ends with an exit criterion that must hold before the next starts.
    Exit: several weeks of paper trading without risk-limit violations before a live key exists. Open: needs a market-data feed through `n8n-trading`.
 7. **Self-improvement** and operations hardening (implemented: skill proposals in `core/jarvis_core/selfimprove/`, signed audit checkpoints and WORM export in `core/jarvis_core/audit/`, step-ca workload certificates in `docker/pki/`; runbook: [`runbooks/audit-hardening.md`](runbooks/audit-hardening.md)).
    Exit: a deliberate auto-PR against the risk gate is rejected (`tests/selfimprove/test_exit_criterion.py`, its own CI step).
+8. **Orchestrator and supervisor-worker loop** (implemented in `core/jarvis_core/orchestrator/` and `core/jarvis_core/agents/`, section 4; runbook: [`runbooks/orchestrator.md`](runbooks/orchestrator.md)): core's orchestrator dispatches goals through the mailboxes and tracks them by metadata; the generic loop and the Hermes adapter run inside the domains.
+   Exit: a goal submitted in the deck runs through a domain's real worker and comes back as telemetry (`tests/orchestrator/test_service.py::test_end_to_end_a_reel_runs_through_the_content_worker_and_back`). Open: move the reel pipeline and the private assistant onto the generic loop; a Hermes run on hardware with enough context (Hermes asks for 64k, the local models run at 8k).

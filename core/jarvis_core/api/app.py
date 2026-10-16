@@ -49,7 +49,8 @@ from jarvis_core.api.auth import (
     approval_challenge,
     sha256_hex,
 )
-from jarvis_core.api.reels import ReelDesk, ReelSubmission, TooManyOpenReels
+from jarvis_core.api.context_reviews import ContextReview, ContextReviewDesk, ReviewUnknown
+from jarvis_core.api.reels import ReelDesk, ReelStatus, ReelSubmission, TooManyOpenReels
 from jarvis_core.approvals.grant import (
     GRANT_TTL,
     ApprovalGrant,
@@ -67,6 +68,7 @@ from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntr
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.reel_url import InvalidReelUrl
 from jarvis_core.contracts.telemetry import TelemetryEvent
+from jarvis_core.orchestrator.service import Orchestrator, TaskRecord
 
 SESSION_COOKIE = "jarvis_session"
 AuditSink = Callable[[AuditLogEntry], object]
@@ -125,6 +127,8 @@ class GatewayDeps:
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     bootstrap_used: bool = False
     reels: ReelDesk | None = None
+    orchestrator: Orchestrator | None = None
+    context_reviews: ContextReviewDesk | None = None
 
 
 # --- request bodies ---------------------------------------------------------------------------
@@ -150,6 +154,11 @@ class ApprovalOptionsBody(_Body):
 
 class ReelBody(_Body):
     url: str = Field(max_length=500)
+
+
+class ContextDecisionBody(_Body):
+    accept: bool
+    note: str = Field(default="", max_length=300)
 
 
 # --- app --------------------------------------------------------------------------------------
@@ -333,7 +342,11 @@ def create_app(settings: GatewaySettings, deps: GatewayDeps) -> FastAPI:
         session_of(request)
         now = deps.clock()
         items = [_summary(a, now) for a in deps.approvals.pending()]
-        return {"approvals": items, "count": len(items)}
+        reviews = 0
+        if deps.context_reviews is not None:
+            deps.context_reviews.sync()
+            reviews = len(deps.context_reviews.open())
+        return {"approvals": items, "count": len(items), "context_reviews": reviews}
 
     @app.get("/api/approvals/{approval_id}")
     def approval_detail(approval_id: UUID, request: Request) -> dict[str, Any]:
@@ -456,6 +469,72 @@ def create_app(settings: GatewaySettings, deps: GatewayDeps) -> FastAPI:
         response.status_code = 201 if created else 200
         return {"reel": _reel(submission), "created": created}
 
+    @app.post("/api/content/reels/retry")
+    def retry_reels(request: Request) -> dict[str, Any]:
+        """Queue every failed reel again (e.g. after a fix in the content worker)."""
+        session = session_of(request)
+        desk = reel_desk()
+        desk.sync()
+        retried = desk.retry_failed()
+        for submission in retried:
+            audit(
+                "content:reel_retried",
+                AuditDecision.ALLOW,
+                action=AuditAction.BOUNDARY_EVENT,
+                actor=f"user:{session.user_id}",
+                task_id=submission.task_id,
+                content_hash=sha256_hex(submission.source_ref),
+            )
+        still_failed = sum(s.status is ReelStatus.FAILED for s in desk.all())
+        return {"retried": len(retried), "still_failed": still_failed}
+
+    # --- orchestrator ---------------------------------------------------------------------
+
+    @app.get("/api/tasks")
+    def list_tasks(request: Request) -> dict[str, Any]:
+        session_of(request)
+        if deps.orchestrator is None:
+            raise HTTPException(503, "the orchestrator is not configured")
+        deps.orchestrator.tick()
+        return {"tasks": [_task(t) for t in deps.orchestrator.tasks()[:100]]}
+
+    # --- context reviews ------------------------------------------------------------------
+
+    def review_desk() -> ContextReviewDesk:
+        if deps.context_reviews is None:
+            raise HTTPException(503, "context reviews are not configured")
+        return deps.context_reviews
+
+    @app.get("/api/content/context-reviews")
+    def list_context_reviews(request: Request) -> dict[str, Any]:
+        session_of(request)
+        desk = review_desk()
+        desk.sync()
+        return {
+            "open": [_context_review(r) for r in desk.open()],
+            "recent": [_context_review(r) for r in desk.recent()[:10]],
+        }
+
+    @app.post("/api/content/context-reviews/{brief_id}/decision")
+    def decide_context_review(
+        brief_id: str, body: ContextDecisionBody, request: Request
+    ) -> dict[str, Any]:
+        session = session_of(request)
+        desk = review_desk()
+        try:
+            review = desk.decide(brief_id, body.accept, f"user:{session.user_id}", body.note)
+        except ReviewUnknown as exc:
+            raise HTTPException(409, "Diese Freigabe ist nicht mehr offen.") from exc
+        audit(
+            "content:context_review",
+            AuditDecision.ALLOW if body.accept else AuditDecision.DENY,
+            action=AuditAction.APPROVAL,
+            actor=f"user:{session.user_id}",
+            content_ref=brief_id,
+            taint=review.request.taint,
+        )
+        return {"review": _context_review(review)}
+
     # --- telemetry -----------------------------------------------------------------------
 
     @app.websocket("/ws/telemetry")
@@ -560,6 +639,40 @@ def _reel(submission: ReelSubmission) -> dict[str, Any]:
         "updated_at": submission.updated_at.isoformat(),
         "duration_ms": submission.duration_ms,
         "error_class": submission.error_class,
+    }
+
+
+def _task(record: TaskRecord) -> dict[str, Any]:
+    """Metadata only: the goal itself stays behind its hash."""
+    return {
+        "task_id": str(record.task_id),
+        "kind": record.kind,
+        "domain": record.domain.value,
+        "state": record.state.value,
+        "created_at": record.created_at.isoformat(),
+        "updated_at": record.updated_at.isoformat(),
+        "duration_ms": record.duration_ms,
+        "error_class": record.error_class,
+        "cost_eur": round(record.cost_eur, 6),
+    }
+
+
+def _context_review(review: ContextReview) -> dict[str, Any]:
+    req = review.request
+    return {
+        "brief_id": req.brief_id,
+        "category": req.category,
+        "proposal": req.proposal,
+        "confidence": req.confidence,
+        "title": req.title,
+        "summary": req.summary,
+        "facts": list(req.facts),
+        "reasons": list(req.reasons),
+        "flags": list(req.flags),
+        "source_refs": list(req.source_refs),
+        "received_at": review.received_at.isoformat(),
+        "decided_at": review.decided_at.isoformat() if review.decided_at else None,
+        "accepted": review.accepted,
     }
 
 

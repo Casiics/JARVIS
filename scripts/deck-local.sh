@@ -2,7 +2,8 @@
 # Starts the command deck on http://localhost:8080 for a local trial, without SOPS, Postgres
 # or a tailnet. Creates throwaway secrets under JARVIS_DECK_LOCAL_DIR (default
 # ~/.local/share/jarvis-deck-local), builds the deck, and prints the one-time setup code.
-# Never use this on the server: the audit log stays in memory and the origin is plain http.
+# Never use this on the server: the origin is plain http and the audit log is a local file
+# chain (<state>/data/audit.jsonl), not pg-audit.
 #
 # Requires: uv, pnpm, openssl. Passkeys need a browser with a platform authenticator
 # (Touch ID, Windows Hello) or a security key.
@@ -33,10 +34,9 @@ cat <<EOF
   First start:    "Erster Start: Passkey einrichten", setup code:
                   $(cat "$STATE/secrets/core/deck_bootstrap_code")
   Local state:    $STATE (delete it to start over)
-  Reels:          submitted reels wait in $STATE/boundary. To process them, run the
-                  reel worker in a second terminal (needs the setup in
-                  docs/runbooks/reel-pipeline.md):
-                  uv run python -m mod_content.reel serve --boundary-dir $STATE/boundary
+  Reels:          submitted reels wait in $STATE/boundary. To process them, start the
+                  reel worker in a second terminal (setup: docs/runbooks/reel-pipeline.md):
+                  scripts/reel-worker-local.sh
 
 EOF
 

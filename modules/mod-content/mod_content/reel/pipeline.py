@@ -42,6 +42,7 @@ from mod_content.reel.quarantine import QuarantinedWorker
 from mod_content.reel.sandbox import (
     REEL_EGRESS_ALLOWLIST,
     SandboxMount,
+    SandboxResult,
     SandboxRunner,
     SandboxSpec,
 )
@@ -51,6 +52,30 @@ from mod_content.reel.schemas import (
     Transcript,
 )
 from mod_content.reel.store import ReelRunRecord, StageMetric
+
+# Exit codes of `reel-media fetch` (sandbox/reel_media.py) and what they mean. Only the code
+# leaves the sandbox, so the class is safe to report to core and show in the deck.
+FETCH_EXIT_CLASSES: dict[int, str] = {
+    20: "fetch_login_required",
+    21: "fetch_not_available",
+    22: "fetch_proxy_unreachable",
+    23: "fetch_network_error",
+    24: "fetch_too_large",
+    25: "fetch_no_video",
+}
+# Exit codes of `docker run` / `podman run` itself, before the tool inside runs.
+_ENGINE_EXIT_CLASSES: dict[int, str] = {125: "sandbox_start_failed", 126: "sandbox_start_failed"}
+
+
+def sandbox_error_class(step: str, result: SandboxResult) -> str:
+    if result.timed_out:
+        return f"{step}_timeout"
+    if result.exit_code in _ENGINE_EXIT_CLASSES:
+        return f"{step}_{_ENGINE_EXIT_CLASSES[result.exit_code]}"
+    if step == "fetch" and result.exit_code in FETCH_EXIT_CLASSES:
+        return FETCH_EXIT_CLASSES[result.exit_code]
+    return f"{step}_failed"
+
 
 TOOL_FETCH = "sandbox.fetch"
 TOOL_EXTRACT = "sandbox.extract"
@@ -363,7 +388,7 @@ class ReelPipeline:
         result = self.runner.run(spec)
         stages.append(StageMetric(name=spec.step, duration_ms=result.duration_ms, ok=result.ok))
         if not result.ok:
-            raise _StepFailed(f"{spec.step}_{'timeout' if result.timed_out else 'failed'}")
+            raise _StepFailed(sandbox_error_class(spec.step, result))
 
     def _timed[T](self, stages: list[StageMetric], name: str, fn: Callable[[], T]) -> T:
         start = self.clock()

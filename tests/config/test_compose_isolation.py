@@ -43,6 +43,8 @@ EXPECTED_NETWORKS = {
     "pki-init": set(),
     "pki-issue": {"net-pki"},
     "ollama": {"net-inference", "net-inference-private"},
+    # Host network, bound to the tailnet address only; see test_deck_edge_*.
+    "edge-caddy": set(),
 }
 
 DOMAIN_OF_NETWORK = {
@@ -63,7 +65,7 @@ DOMAIN_OF_NETWORK = {
 HARDENED = [
     s
     for s in EXPECTED_NETWORKS
-    if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-", "pki-"))
+    if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-", "pki-", "edge-"))
     or s in {"private-assistant", "audit-keeper", "trading-paper"}
 ]
 
@@ -133,8 +135,10 @@ def test_isolation_services_are_hardened(compose: dict[str, Any], service: str) 
     assert spec.get("user"), f"{service} must set its user"
     if service != "pki-issue":  # root without capabilities, see the compose comment
         assert not str(spec["user"]).startswith("0"), f"{service} must not run as root"
-    # pki-ca: the step-ca binary needs this one capability to exec, see the compose comment.
-    assert spec.get("cap_add", []) == (["NET_BIND_SERVICE"] if service == "pki-ca" else [])
+    # pki-ca and edge-caddy: their binaries need this one capability to exec, see the compose
+    # comments.
+    needs_bind = service in {"pki-ca", "edge-caddy"}
+    assert spec.get("cap_add", []) == (["NET_BIND_SERVICE"] if needs_bind else [])
 
 
 @pytest.mark.parametrize("domain", ["trading", "content"])
@@ -265,3 +269,35 @@ def test_audit_keeper_reads_its_key_where_the_provider_looks(compose: dict[str, 
     secrets = compose["services"]["audit-keeper"]["secrets"]
     key = next(s for s in secrets if s["source"] == "core_audit_signing_key")
     assert key["target"] == "/run/jarvis/secrets/core/audit_signing_key"
+
+
+EDGE_CADDYFILE = COMPOSE.parent / "edge/Caddyfile"
+
+
+def test_only_the_deck_edge_uses_the_host_network(compose: dict[str, Any]) -> None:
+    on_host = {n for n, s in compose["services"].items() if s.get("network_mode") == "host"}
+    assert on_host == {"edge-caddy"}
+    assert "ports" not in compose["services"]["edge-caddy"]
+
+
+def test_deck_edge_refuses_to_start_without_a_tailnet_address(compose: dict[str, Any]) -> None:
+    script = " ".join(compose["services"]["edge-caddy"]["command"])
+    assert 'case "$$JARVIS_TAILNET_IP" in 100.*)' in script
+    assert "exit 1" in script
+    assert script.rstrip().endswith("--adapter caddyfile")
+
+
+def test_deck_edge_terminates_tls13_on_the_tailnet_only() -> None:
+    lines = [
+        line.strip()
+        for line in EDGE_CADDYFILE.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert "admin off" in lines
+    assert "bind {$JARVIS_TAILNET_IP}" in lines
+    assert "protocols tls1.3" in lines
+    assert "tls /certs/deck.crt /certs/deck.key {" in lines
+    assert any(line.startswith("Strict-Transport-Security") for line in lines)
+    # The upstream is the gateway on the host's loopback, nothing else.
+    upstreams = [line for line in lines if line.startswith("reverse_proxy")]
+    assert upstreams == ["reverse_proxy 127.0.0.1:{$JARVIS_DECK_UPSTREAM_PORT:8080} {"]

@@ -442,6 +442,41 @@ services:
       - { source: core_pg_audit_reader_password, target: pg_audit_reader_password }
       - { source: core_audit_signing_key, target: /run/jarvis/secrets/core/audit_signing_key }
 
+  # TLS edge for the deck (net-edge). Host network, because the API gateway listens on the
+  # host's loopback and Caddy must bind the tailnet address; it binds nothing else (Caddyfile
+  # `bind`). No admin API, no ACME, no docker network: certificates come from `tailscale cert`.
+  edge-caddy:
+    image: caddy:2.10.0-alpine
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    # Like pki-ca: the caddy binary carries the cap_net_bind_service file capability and the
+    # kernel refuses to exec it without that capability in the bounding set. Default port 8443.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: host
+    # Refuses to start without the host name and tailnet address: an empty `bind` would listen
+    # on every interface.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        case "$$JARVIS_TAILNET_IP" in 100.*) ;; *) echo "JARVIS_TAILNET_IP must be the 100.x tailnet address" >&2; exit 1;; esac;
+        [ -n "$$JARVIS_DECK_HOST" ] || { echo "JARVIS_DECK_HOST is not set" >&2; exit 1; };
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    environment:
+      JARVIS_DECK_HOST: ${JARVIS_DECK_HOST:-}
+      JARVIS_TAILNET_IP: ${JARVIS_TAILNET_IP:-}
+      JARVIS_DECK_TLS_PORT: ${JARVIS_DECK_TLS_PORT:-8443}
+      JARVIS_DECK_UPSTREAM_PORT: ${JARVIS_DECK_UPSTREAM_PORT:-8080}
+      XDG_DATA_HOME: /tmp/caddy-data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+    tmpfs: ["/tmp:uid=1000,gid=1000"]
+    volumes:
+      - ./edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${JARVIS_DECK_TLS_DIR:-/etc/jarvis/tls}:/certs:ro
+    profiles: [edge]
+
   # Workload CA: short-lived X.509 certificates with SPIFFE IDs. No domain network reaches it;
   # pki-issue writes each domain's certificates into that domain's own volume.
   pki-ca:
