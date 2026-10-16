@@ -423,9 +423,13 @@ gateway = [
     { name = "webauthn" },
     { name = "websockets" },
 ]
+gitgateway = [
+    { name = "cryptography" },
+]
 
 [package.dev-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mypy" },
@@ -440,6 +444,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", marker = "extra == 'gitgateway'", specifier = ">=45,<51" },
     { name = "fastapi", marker = "extra == 'gateway'", specifier = ">=0.115,<1" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'db'", specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.8,<3" },
@@ -448,10 +453,11 @@ requires-dist = [
     { name = "webauthn", marker = "extra == 'gateway'", specifier = ">=3.0,<4" },
     { name = "websockets", marker = "extra == 'gateway'", specifier = ">=15,<17" },
 ]
-provides-extras = ["db", "gateway"]
+provides-extras = ["db", "gateway", "gitgateway"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cryptography", specifier = ">=45,<51" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "mypy", specifier = ">=1.13" },

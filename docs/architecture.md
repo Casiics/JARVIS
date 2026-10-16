@@ -31,7 +31,7 @@ Each domain has its own Hermes instance (supervisor and workers), its own n8n in
                     │ net-edge: Caddy (mTLS) + Tailscale, no open ports │
                     └────────────────────────┬─────────────────────────┘
                     ┌────────────────────────▼─────────────────────────┐
-                    │ net-gateway: API gateway, policy gateway, UI      │
+                    │ net-gateway: API gateway, UI                      │
                     └──┬─────────────┬──────────────┬─────────────┬────┘
           ┌────────────▼───┐ ┌───────▼───────┐ ┌────▼─────────┐ ┌─▼─────────────┐
           │ CORE           │ │ TRADING       │ │ CONTENT      │ │ PRIVATE       │
@@ -47,7 +47,7 @@ Each domain has its own Hermes instance (supervisor and workers), its own n8n in
           └────────────────────────────────┘
 ```
 
-Events enter only through a domain's n8n instance or the API gateway. Core issues work to domains as signed task tokens and receives results and metadata back. Only deterministic executors hold credentials. The private domain reports nothing but metadata.
+Events enter only through a domain's n8n instance or the API gateway. Inside each domain, agents reach their n8n tools only through the domain's policy gateway (Envoy + OPA), and only egress proxies have a route out (section 7.3). Core issues work to domains as signed task tokens and receives results and metadata back. Only deterministic executors hold credentials. The private domain reports nothing but metadata.
 
 ## 3. Components
 
@@ -211,15 +211,20 @@ The full concept, including the threat model, lives in the project's Zero-Trust 
 | Network | Members | Egress |
 |---|---|---|
 | `net-edge` | Caddy, Tailscale sidecar | Tailnet only |
-| `net-gateway` | API gateway, policy gateway, UI backend | None |
-| `net-core` | Task router, orchestrator, model router, audit writer, `pg-core`, `pg-audit`, `redis-core` | Cloud LLM APIs and GitHub via egress proxy |
-| `net-trading` | Trading Hermes, `n8n-trading`, risk gate, `pg-trading` | Broker and market data hosts via egress proxy |
-| `net-content` | Content Hermes, `n8n-content`, `pg-content`, `qdrant-content` | Social APIs and research hosts via egress proxy |
-| `net-private` | Private Hermes, `n8n-private`, `pg-private`, `qdrant-private`, `redis-private` | CalDAV and IMAP only |
+| `net-gateway` | API gateway, UI backend | None |
+| `net-core` | Task router, orchestrator, model router, audit writer, `pg-core`, `pg-audit`, `redis-core`, `egress-core` | Cloud LLM APIs and GitHub via `egress-core` |
+| `net-trading` | Trading Hermes, risk gate, `pg-trading`, `mcp-gateway-trading` | None |
+| `net-content` | Content Hermes, `pg-content`, `qdrant-content`, `mcp-gateway-content` | None |
+| `net-private` | Private Hermes, `pg-private`, `qdrant-private`, `redis-private`, `mcp-gateway-private` | None |
+| `net-mcp-<domain>` | The domain's n8n, OPA, policy gateway and egress proxy | Per-domain allowlist via `egress-<domain>`; private: CalDAV and IMAP only via `egress-private` |
 | `net-inference` | Ollama | None |
+| `jarvis-sandbox-egress` | Reel fetch sandboxes, `egress-reel` | Instagram hosts via `egress-reel` |
 | `net-sandbox-<id>` | One sandbox run | Per run, default none |
+| `net-egress` | `egress-*` proxies only | Internet |
 
-All domain networks are `internal: true`. No host ports; debugging uses `docker/docker-compose.debug.yml` on a workstation only.
+Agents never reach their n8n directly: the policy gateway (Envoy with OPA as ext_authz, `policies/mcp/`) is the only member of both `net-<domain>` and `net-mcp-<domain>`. Allowlists live in `policies/egress/`. Runbook: [`runbooks/isolation-services.md`](runbooks/isolation-services.md).
+
+All networks except `net-egress` are `internal: true`. No host ports; debugging uses `docker/docker-compose.debug.yml` on a workstation only.
 
 ### 7.4 Supply chain
 
@@ -278,7 +283,8 @@ Each phase ends with an exit criterion that must hold before the next starts.
    Exit: 20 real reels processed, cost and audit visible (`python -m mod_content.reel report`). Open: needs a run on the workstation GPU.
 3. **Dashboard skeleton** and API gateway with passkey login (implemented in `apps/deck/` and `core/jarvis_core/api/`; runbook: [`runbooks/command-deck.md`](runbooks/command-deck.md)). Approvals are passkey ceremonies bound to one request and one decision; executors accept only the resulting single-use grant (`core/jarvis_core/approvals/`).
    Exit: a tier C action can only be approved via the deck (`tests/api/test_deck_approvals.py`).
-4. **Isolation services**: one n8n instance per domain, policy gateway (OPA behind Envoy) in front of all MCP servers, egress proxy with per-domain allowlists, git gateway.
+4. **Isolation services**: one n8n instance per domain, policy gateway (OPA behind Envoy) in front of all MCP servers, egress proxy with per-domain allowlists, git gateway (implemented in `docker/`, `policies/` and `core/jarvis_core/gitgateway/`; runbook: [`runbooks/isolation-services.md`](runbooks/isolation-services.md)).
+   Exit: live network tests in Docker show that agents have no route out and reach tools only through the policy gateway, that each egress proxy allows only its allowlist, and that the git gateway refuses protected paths (`tests/isolation/`, `tests/gitgateway/`).
 5. **Private domain** with local supervisor.
    Exit: a network test shows `net-private` reaches only CalDAV and IMAP.
 6. **Trading domain** with `BrokerAdapter`, risk gate and kill switch; paper/testnet only.

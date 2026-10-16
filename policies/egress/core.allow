@@ -1,0 +1,6 @@
+# Egress allowlist for the core domain: Squid dstdomain syntax, one host name per line.
+# A leading dot also matches every subdomain. HTTPS (port 443) only.
+# Used by: model router (cloud LLM APIs), git gateway (GitHub App, auto-improve pushes).
+api.anthropic.com
+github.com
+api.github.com

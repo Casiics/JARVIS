@@ -1,0 +1,6 @@
+# Egress allowlist for the reel fetch sandbox (yt-dlp): Squid dstdomain syntax.
+# A leading dot also matches every subdomain. HTTPS (port 443) only.
+# Must cover mod_content.reel.sandbox.REEL_EGRESS_ALLOWLIST (checked by tests/config).
+.instagram.com
+.cdninstagram.com
+.fbcdn.net

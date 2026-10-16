@@ -37,10 +37,10 @@ Caddy terminates TLS on the tailnet and proxies to `127.0.0.1:8080`, including t
 - Every POST must come from the deck's origin as JSON; everything else gets 403 or 415.
 - CSP `default-src 'self'`, `frame-ancestors 'none'`, no referrer, no caching.
 - Telemetry over WebSocket needs a session and the deck origin. Events are metadata only (`contracts/telemetry.py`, mirrored by Zod in `apps/deck/src/schemas.ts`); anything with extra fields is dropped on both sides.
-- Passkeys and approvals are stored as 0600 JSON files under `--data-dir` until pg-core takes them over in Phase 4. Without `--audit-dsn` the audit log stays in memory, and the gateway says so on start.
+- Passkeys and approvals are stored as 0600 JSON files under `--data-dir` until pg-core takes them over together with the orchestrator service. Without `--audit-dsn` the audit log stays in memory, and the gateway says so on start.
 
-## Known limits of Phase 3
+## Known limits
 
-- No domain feeds the approval queue across processes yet. The orchestrator and domain services arrive in Phase 4. Until then, approvals are queued in-process with `hold()`.
+- No domain feeds the approval queue across processes yet. The orchestrator and domain services arrive with Phases 5 and 6. Until then, approvals are queued in-process with `hold()`.
 - Six of the seven dashboards are a frame with navigation and deep links. Their data arrives with the phases noted on each page.
-- Kill switch and daily spend in the top bar arrive with Phase 4, together with the services they act on.
+- Kill switch and daily spend in the top bar arrive with the trading domain and the FinOps service (Phase 6), together with the services they act on.

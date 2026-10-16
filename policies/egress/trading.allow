@@ -1,0 +1,4 @@
+# Egress allowlist for the trading domain: Squid dstdomain syntax, one host name per line.
+# A leading dot also matches every subdomain. HTTPS (port 443) only.
+# Empty until Phase 6 adds the paper/testnet broker and market data hosts. Live broker hosts
+# are added only together with a human go-live decision.
