@@ -24,6 +24,8 @@ from pydantic import Field, TypeAdapter, ValidationError
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.events import (
     BoundaryEvent,
+    ContextReviewDecided,
+    ContextReviewRequested,
     LifeTipProposed,
     ReelSubmitted,
     TaskMetadata,
@@ -32,7 +34,12 @@ from jarvis_core.contracts.events import (
 from jarvis_core.policy.flows import check_flow
 
 AnyEvent = Annotated[
-    ReelSubmitted | TaskMetadata | TradingIdeaProposed | LifeTipProposed,
+    ReelSubmitted
+    | TaskMetadata
+    | TradingIdeaProposed
+    | LifeTipProposed
+    | ContextReviewRequested
+    | ContextReviewDecided,
     Field(discriminator="kind"),
 ]
 _EVENT: TypeAdapter[AnyEvent] = TypeAdapter(AnyEvent)

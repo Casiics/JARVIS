@@ -34,10 +34,9 @@ cat <<EOF
   First start:    "Erster Start: Passkey einrichten", setup code:
                   $(cat "$STATE/secrets/core/deck_bootstrap_code")
   Local state:    $STATE (delete it to start over)
-  Reels:          submitted reels wait in $STATE/boundary. To process them, run the
-                  reel worker in a second terminal (needs the setup in
-                  docs/runbooks/reel-pipeline.md):
-                  uv run python -m mod_content.reel serve --boundary-dir $STATE/boundary
+  Reels:          submitted reels wait in $STATE/boundary. To process them, start the
+                  reel worker in a second terminal (setup: docs/runbooks/reel-pipeline.md):
+                  scripts/reel-worker-local.sh
 
 EOF
 

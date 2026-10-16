@@ -1,12 +1,16 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
 import { logout } from "./api";
 import { DASHBOARDS } from "./dashboards";
+import { useEscalationCount } from "./live";
 import { useAttention } from "./useAttention";
 
 export function Shell({ onSignedOut }: { onSignedOut: () => void }) {
   const attentionState = useAttention();
   const { attention } = attentionState;
-  const waiting = attention?.count ?? 0;
+  const approvals = attention?.count ?? 0;
+  const reviews = attention?.context_reviews ?? 0;
+  const waiting = approvals + reviews;
+  const escalated = useEscalationCount();
 
   return (
     <div className="shell">
@@ -15,9 +19,19 @@ export function Shell({ onSignedOut }: { onSignedOut: () => void }) {
         {DASHBOARDS.map((d) => (
           <NavLink key={d.path} to={d.path} end={d.path === "/"} className="nav-item">
             <span>{d.title}</span>
-            {d.path === "/" && waiting > 0 && (
-              <span className="badge" aria-label={`${String(waiting)} Freigaben offen`}>
-                {waiting}
+            {d.path === "/" && approvals > 0 && (
+              <span className="badge" aria-label={`${String(approvals)} Freigaben offen`}>
+                {approvals}
+              </span>
+            )}
+            {d.path === "/content" && reviews > 0 && (
+              <span className="badge" aria-label={`${String(reviews)} Kontext-Freigaben offen`}>
+                {reviews}
+              </span>
+            )}
+            {d.path === "/agents" && escalated > 0 && (
+              <span className="badge badge-critical" aria-label={`${String(escalated)} eskaliert`}>
+                {escalated}
               </span>
             )}
           </NavLink>
@@ -26,8 +40,17 @@ export function Shell({ onSignedOut }: { onSignedOut: () => void }) {
       <div className="main">
         <header className="topbar">
           <span className={`status ${waiting > 0 ? "status-warn" : "status-ok"}`}>
-            {waiting > 0 ? `● ${String(waiting)} wartet auf dich` : "● Alles ruhig"}
+            {waiting > 0
+              ? `● ${String(waiting)} wartet auf dich`
+              : escalated > 0
+                ? "● Keine Freigaben offen"
+                : "● Alles ruhig"}
           </span>
+          {escalated > 0 && (
+            <Link to="/agents" className="status status-critical">
+              ⚠ {escalated} eskaliert (24 h)
+            </Link>
+          )}
           <span className="muted">Kill-Switch und Tageskosten folgen mit dem Trading-Dienst</span>
           <button
             type="button"

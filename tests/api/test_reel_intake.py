@@ -17,6 +17,7 @@ from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditAction
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import ReelSubmitted, TaskMetadata
+from jarvis_core.orchestrator.service import Orchestrator
 from tests.api.test_deck_approvals import ORIGIN, Deck
 
 URL = "https://www.instagram.com/reel/ABCDE12345/?igsh=share-tracking"
@@ -26,10 +27,15 @@ CANONICAL = "https://www.instagram.com/reel/ABCDE12345/"
 @pytest.fixture
 def deck(tmp_path: Path) -> Deck:
     d = Deck()
-    d.deps.reels = ReelDesk(
+    d.deps.orchestrator = Orchestrator(
         Mailbox(tmp_path / "boundary", Domain.CORE),
-        tmp_path / "core/reels.json",
+        tmp_path / "core/tasks.json",
         clock=lambda: datetime.now(UTC),
+        audit=d.audit.append,
+        telemetry=d.deps.telemetry.publish,
+    )
+    d.deps.reels = ReelDesk(
+        d.deps.orchestrator, tmp_path / "core/reels.json", clock=lambda: datetime.now(UTC)
     )
     d.register()
     d.login()
@@ -64,9 +70,11 @@ def test_submitting_a_reel_sends_one_canonical_event_to_content(deck: Deck, tmp_
     assert isinstance(letter.event, ReelSubmitted)
     assert letter.event.source_ref == CANONICAL
     assert str(letter.event.task_id) == reel["task_id"]
-    [entry] = [e for e in deck.audit if e.action is AuditAction.BOUNDARY_EVENT]
-    assert entry.target == "content:reel_submitted" and entry.content_hash
-    assert CANONICAL not in entry.model_dump_json()  # the audit log holds hashes only
+    targets = [e.target for e in deck.audit if e.action is AuditAction.BOUNDARY_EVENT]
+    assert targets == ["dispatch:reel->content", "content:reel_submitted"]
+    entry = next(e for e in deck.audit if e.target == "content:reel_submitted")
+    assert entry.content_hash
+    assert all(CANONICAL not in e.model_dump_json() for e in deck.audit)  # hashes only
 
 
 def test_the_same_reel_is_queued_once(deck: Deck, tmp_path: Path) -> None:
@@ -135,12 +143,14 @@ def test_open_reels_are_capped(deck: Deck, tmp_path: Path, monkeypatch: pytest.M
 
 def test_submissions_survive_a_restart(deck: Deck, tmp_path: Path) -> None:
     deck.post("/api/content/reels", {"url": URL})
-    again = ReelDesk(
-        Mailbox(tmp_path / "boundary", Domain.CORE),
-        tmp_path / "core/reels.json",
-        clock=lambda: datetime.now(UTC),
+    clock = lambda: datetime.now(UTC)  # noqa: E731
+    orchestrator = Orchestrator(
+        Mailbox(tmp_path / "boundary", Domain.CORE), tmp_path / "core/tasks.json", clock=clock
     )
+    again = ReelDesk(orchestrator, tmp_path / "core/reels.json", clock=clock)
     assert [s.source_ref for s in again.all()] == [CANONICAL]
+    [task] = orchestrator.tasks()
+    assert task.kind == "reel" and task.domain is Domain.CONTENT
 
 
 def test_without_a_mailbox_the_intake_says_so() -> None:
@@ -148,3 +158,69 @@ def test_without_a_mailbox_the_intake_says_so() -> None:
     d.register()
     d.login()
     assert d.client.get("/api/content/reels").status_code == 503
+
+
+def test_the_deck_lists_orchestrator_tasks_as_metadata(deck: Deck, tmp_path: Path) -> None:
+    task_id = deck.post("/api/content/reels", {"url": URL}).json()["reel"]["task_id"]
+    report(tmp_path, task_id, "running")
+    res = deck.client.get("/api/tasks")
+    assert res.status_code == 200
+    [task] = res.json()["tasks"]
+    assert task["task_id"] == task_id and task["domain"] == "content"
+    assert task["kind"] == "reel" and task["state"] == "running"
+    assert CANONICAL not in res.text  # the goal stays behind its hash
+
+
+def test_failed_reels_can_be_retried_in_one_go(
+    deck: Deck, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(reels_module, "MAX_OPEN", 2)
+    ids = [
+        deck.post("/api/content/reels", {"url": f"{CANONICAL[:-11]}{code}/"}).json()["reel"][
+            "task_id"
+        ]
+        for code in ("AAAAA1", "BBBBB2")
+    ]
+    for task_id in ids:
+        report(tmp_path, task_id, "escalated", "fetch_failed")
+    deck.client.get("/api/content/reels")  # picks up the failures
+    third = deck.post("/api/content/reels", {"url": f"{CANONICAL[:-11]}CCCCC3/"})
+    assert third.status_code == 201  # one of the two open slots is now taken
+
+    res = deck.post("/api/content/reels/retry")
+    assert res.status_code == 200
+    assert res.json() == {"retried": 1, "still_failed": 1}  # the cap leaves one for later
+    reels = deck.client.get("/api/content/reels").json()["reels"]
+    assert sorted(r["status"] for r in reels) == ["failed", "queued", "queued"]
+    retried = [e for e in deck.audit if e.target == "content:reel_retried"]
+    assert len(retried) == 1 and retried[0].content_hash
+    # The retry went to content as a new task.
+    sent = [letter.event for letter in content(tmp_path).receive(Domain.CORE)]
+    assert len(sent) == 4 and len({e.task_id for e in sent}) == 4  # type: ignore[attr-defined]
+
+
+def test_retry_needs_a_session(deck: Deck) -> None:
+    other = Deck()
+    other.deps.reels = deck.deps.reels
+    assert other.post("/api/content/reels/retry").status_code == 401
+
+
+def test_reels_queued_before_the_orchestrator_are_adopted(tmp_path: Path) -> None:
+    from jarvis_core.api.reels import ReelSubmission
+    from jarvis_core.storage import write_atomic
+
+    legacy = ReelSubmission(
+        task_id=UUID("11111111-1111-4111-8111-111111111111"),
+        source_ref=CANONICAL,
+        submitted_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    write_atomic(tmp_path / "core/reels.json", b"[" + legacy.model_dump_json().encode() + b"]")
+    clock = lambda: datetime.now(UTC)  # noqa: E731
+    orchestrator = Orchestrator(Mailbox(tmp_path / "boundary", Domain.CORE), None, clock=clock)
+    desk = ReelDesk(orchestrator, tmp_path / "core/reels.json", clock=clock)
+    assert content(tmp_path).receive(Domain.CORE) == []  # nothing is sent again
+
+    report(tmp_path, str(legacy.task_id), "done")
+    desk.sync()
+    assert [s.status.value for s in desk.all()] == ["done"]

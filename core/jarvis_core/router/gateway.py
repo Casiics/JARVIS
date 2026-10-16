@@ -18,7 +18,7 @@ from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntr
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import Taint
 from jarvis_core.router.budget import BudgetExceeded, CircuitBreaker
-from jarvis_core.router.catalog import Endpoint, ModelClass
+from jarvis_core.router.catalog import Endpoint, ModelClass, local_context
 from jarvis_core.router.client import ChatMessage, ModelCall, ModelClient
 from jarvis_core.router.policy import Route, RouteRequest, RoutingDenied, route
 
@@ -123,6 +123,8 @@ class InferenceGateway:
             messages=messages,
             json_schema=json_schema,
             max_output_tokens=max_output_tokens,
+            # Without this every local model ran at 8k, including the 32k coding fallback.
+            context_tokens=local_context(chosen.model),
         )
         result = client.complete(call)
         duration_ms = int((self.clock() - now).total_seconds() * 1000)

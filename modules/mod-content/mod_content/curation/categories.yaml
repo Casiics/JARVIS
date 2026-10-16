@@ -1,0 +1,32 @@
+# Context categories of the content domain. Edit freely; the pipeline validates this file.
+# Membership: tags count double, keywords once; the highest score wins, ties go to the first.
+# confidence >= auto_store_at stores automatically, < auto_discard_below discards,
+# anything in between waits for review.
+domain: content
+default_category: general
+categories:
+  - name: dev-tooling
+    description: Developer tools, CLIs, editors, code workflows
+    tags: [mod-self-evolution]
+    keywords: [cli, git, github, python, terminal, editor, vscode, ripgrep, docker, linux, code, api]
+  - name: ai-automation
+    description: LLMs, agents, prompts and automation
+    keywords: [llm, agent, agents, prompt, gpt, chatgpt, claude, n8n, automation, ollama, whisper, mcp, rag]
+  - name: content-craft
+    description: Hooks, editing, formats and growth for own content
+    tags: [mod-content]
+    keywords: [hook, hooks, editing, thumbnail, caption, audience, viral, storytelling, retention, script]
+  - name: market-notes
+    description: Market and trading observations (public notes only; trading decides on its own)
+    tags: [mod-trading]
+    keywords: [stock, stocks, etf, spy, qqq, iwm, options, trading, earnings, market, chart]
+    # Trading claims from social media are the noisiest material: keep a human in the loop longer.
+    min_signal: 0.4
+    auto_store_at: 0.85
+  - name: life
+    description: Habits, health and productivity tips (public tips, never personal data)
+    tags: [mod-life-os]
+    keywords: [habit, habits, sleep, fitness, health, productivity, focus, routine]
+  - name: general
+    description: Everything that fits no other category
+    auto_store_at: 0.8

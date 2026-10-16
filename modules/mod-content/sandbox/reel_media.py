@@ -19,6 +19,58 @@ MAX_FRAMES = 12
 SCENE_THRESHOLD = 0.3
 FFMPEG = "/usr/bin/ffmpeg"
 YTDLP = "/usr/local/bin/yt-dlp"
+# Why a fetch failed, as an exit code. Only this number leaves the sandbox: yt-dlp's own
+# messages are untrusted text and stay inside (they still go to stderr, which the host hashes).
+# Keep in sync with FETCH_EXIT_CLASSES in mod_content/reel/pipeline.py.
+EXIT_LOGIN_REQUIRED = 20
+EXIT_NOT_AVAILABLE = 21
+EXIT_PROXY = 22
+EXIT_NETWORK = 23
+EXIT_TOO_LARGE = 24
+EXIT_NO_VIDEO = 25
+EXIT_UNKNOWN = 29
+_FETCH_ERRORS: tuple[tuple[int, tuple[str, ...]], ...] = (
+    (
+        EXIT_PROXY,
+        (
+            "proxyerror",
+            "unable to connect to proxy",
+            "tunnel connection failed",
+            "407 proxy",
+            "cannot connect to proxy",
+        ),
+    ),
+    (
+        EXIT_LOGIN_REQUIRED,
+        ("login required", "log in", "--cookies", "rate-limit", "rate limit", "http error 429"),
+    ),
+    (
+        EXIT_NOT_AVAILABLE,
+        ("not available", "http error 404", "unsupported url", "empty media response", "private"),
+    ),
+    (
+        EXIT_NETWORK,
+        (
+            "name or service not known",
+            "temporary failure in name resolution",
+            "timed out",
+            "connection refused",
+            "network is unreachable",
+            "connection reset",
+        ),
+    ),
+    (EXIT_TOO_LARGE, ("larger than max-filesize", "does not pass filter")),
+)
+
+
+def classify_fetch_error(stderr: str) -> int:
+    lowered = stderr.lower()
+    for code, needles in _FETCH_ERRORS:
+        if any(n in lowered for n in needles):
+            return code
+    return EXIT_UNKNOWN
+
+
 # Fixed mount points inside the sandbox; overridable only to test the script outside one.
 IN_DIR = Path(os.environ.get("REEL_MEDIA_IN", "/in"))
 OUT_DIR = Path(os.environ.get("REEL_MEDIA_OUT", "/out"))
@@ -47,13 +99,14 @@ def fetch(url: str) -> int:
         "--",
         url,
     ]
-    proc = subprocess.run(cmd, check=False)  # noqa: S603
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)  # noqa: S603
+    sys.stderr.write(proc.stderr[-20_000:])
     if proc.returncode != 0:
-        return proc.returncode
+        return classify_fetch_error(proc.stderr)
     info = out / "media.info.json"
     if info.exists():
         info.rename(out / "info.json")
-    return 0 if (out / "media.mp4").exists() else 3
+    return 0 if (out / "media.mp4").exists() else EXIT_NO_VIDEO
 
 
 def extract() -> int:

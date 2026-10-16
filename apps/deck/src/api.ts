@@ -9,10 +9,14 @@ import {
   ApprovalDetail,
   Attention,
   CeremonyStart,
+  ContextReviewList,
+  ContextReviewResult,
   DecisionResult,
   Me,
   ReelList,
   ReelSubmitResult,
+  RetryResult,
+  TaskList,
 } from "./schemas";
 
 export class ApiError extends Error {
@@ -51,6 +55,24 @@ export const getReels = (): Promise<z.infer<typeof ReelList>> =>
   request(ReelList, "/api/content/reels");
 export const submitReel = (url: string): Promise<z.infer<typeof ReelSubmitResult>> =>
   request(ReelSubmitResult, "/api/content/reels", { url });
+
+/** Queue every failed reel again, e.g. after the content worker was fixed. */
+export const retryFailedReels = (): Promise<z.infer<typeof RetryResult>> =>
+  request(RetryResult, "/api/content/reels/retry", {});
+
+export const getTasks = (): Promise<z.infer<typeof TaskList>> => request(TaskList, "/api/tasks");
+
+export const getContextReviews = (): Promise<z.infer<typeof ContextReviewList>> =>
+  request(ContextReviewList, "/api/content/context-reviews");
+export const decideContextReview = (
+  briefId: string,
+  accept: boolean,
+): Promise<z.infer<typeof ContextReviewResult>> =>
+  request(
+    ContextReviewResult,
+    `/api/content/context-reviews/${encodeURIComponent(briefId)}/decision`,
+    { accept },
+  );
 
 const Ok = z.looseObject({});
 
