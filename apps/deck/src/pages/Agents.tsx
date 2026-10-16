@@ -4,6 +4,7 @@ import { DOMAIN_LABEL, STATE_LABEL, formatDuration } from "../format";
 import {
   ACTIVE_STATES,
   STAGES,
+  costToday,
   errorHint,
   stageIndex,
   summarise,
@@ -220,6 +221,10 @@ export function Agents() {
         <div className="kpi" role="listitem">
           <span className="kpi-value positive">{total("done")}</span>
           <span className="muted">fertig</span>
+        </div>
+        <div className="kpi" role="listitem">
+          <span className="kpi-value mono">{costToday(tasks, new Date()).toFixed(2)} €</span>
+          <span className="muted">Modellkosten heute</span>
         </div>
         <div className="kpi" role="listitem">
           <span className={`kpi-link link-state-${link}`}>{linkLabel}</span>

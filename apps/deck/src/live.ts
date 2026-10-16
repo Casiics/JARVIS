@@ -61,7 +61,7 @@ export function fromSnapshot(task: OrchestratorTask): LiveTask {
     node: null,
     updated_at: task.updated_at,
     duration_ms: task.duration_ms ?? 0,
-    cost_eur: 0,
+    cost_eur: task.cost_eur,
     error_class: task.error_class,
   };
 }
@@ -226,4 +226,13 @@ export function useEscalationCount(): number {
     };
   }, []);
   return count;
+}
+
+/** Model spend of the tasks touched today (local time). Local models cost nothing. */
+export function costToday(tasks: readonly LiveTask[], now: Date): number {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  return tasks
+    .filter((t) => Date.parse(t.updated_at) >= start.getTime())
+    .reduce((sum, t) => sum + t.cost_eur, 0);
 }

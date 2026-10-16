@@ -41,6 +41,7 @@ class MetadataReporter:
                     state=event.state.value,
                     duration_ms=event.duration_ms,
                     error_class=event.error_class,
+                    cost_eur=event.cost_eur,
                 )
             )
         except (MailboxError, OSError):

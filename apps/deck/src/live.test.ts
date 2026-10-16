@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  costToday,
   errorHint,
   fromSnapshot,
   fromTelemetry,
@@ -24,6 +25,7 @@ const snapshot = {
   updated_at: "2026-10-16T12:00:05+00:00",
   duration_ms: 5000,
   error_class: null,
+  cost_eur: 0.0123,
 } as const;
 
 function task(over: Partial<LiveTask>): LiveTask {
@@ -114,5 +116,15 @@ describe("recentEscalations", () => {
       { ...base, state: "done" as const },
     ];
     expect(recentEscalations(tasks, now)).toBe(1);
+  });
+});
+
+describe("costToday", () => {
+  it("adds up today's spend and keeps what the snapshot reported", () => {
+    const now = new Date("2026-10-16T12:00:00");
+    const today = task({ task_id: "a", updated_at: new Date("2026-10-16T09:00:00").toISOString() });
+    const old = task({ task_id: "b", updated_at: new Date("2026-10-15T09:00:00").toISOString() });
+    expect(today.cost_eur).toBe(0.0123);
+    expect(costToday([today, old], now)).toBeCloseTo(0.0123);
   });
 });

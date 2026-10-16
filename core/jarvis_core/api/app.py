@@ -605,6 +605,7 @@ def _task(record: TaskRecord) -> dict[str, Any]:
         "updated_at": record.updated_at.isoformat(),
         "duration_ms": record.duration_ms,
         "error_class": record.error_class,
+        "cost_eur": round(record.cost_eur, 6),
     }
 
 

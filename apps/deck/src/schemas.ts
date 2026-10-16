@@ -115,6 +115,7 @@ export const OrchestratorTask = z.strictObject({
   updated_at: z.iso.datetime({ offset: true }),
   duration_ms: z.number().int().nonnegative().nullable(),
   error_class: z.string().max(80).nullable(),
+  cost_eur: z.number().nonnegative(),
 });
 export type OrchestratorTask = z.infer<typeof OrchestratorTask>;
 
