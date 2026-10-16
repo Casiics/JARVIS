@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type SyntheticEvent } from "react";
 import { ApiError, getReels, submitReel } from "../api";
 import { REEL_STATUS_LABEL, formatAge, formatDuration } from "../format";
 import type { Reel } from "../schemas";
+import { ContextReviews } from "./ContextReviews";
 
 const POLL_MS = 5000;
 
@@ -118,6 +119,8 @@ export function Content() {
           ))}
         </ul>
       </section>
+
+      <ContextReviews />
     </div>
   );
 }

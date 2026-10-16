@@ -82,6 +82,14 @@ main { padding: 24px; }
 .reel-running { border-color: var(--accent); }
 .reel-age { margin-left: auto; }
 .lane a { color: var(--text); }
+.review {
+  display: grid; gap: 8px; padding: 14px; border-radius: 12px; border: 1px solid var(--warning);
+  background: var(--bg);
+}
+.review p { margin: 0; overflow-wrap: anywhere; }
+.review-flagged { border-color: var(--critical); }
+.review-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.review-facts { margin: 0; padding-left: 20px; }
 .intake { display: grid; gap: 8px; }
 .intake-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .intake-row input {

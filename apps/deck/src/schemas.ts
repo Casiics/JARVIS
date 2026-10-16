@@ -46,6 +46,8 @@ export type ApprovalSummary = z.infer<typeof ApprovalSummary>;
 export const Attention = z.strictObject({
   approvals: z.array(ApprovalSummary),
   count: z.number().int().nonnegative(),
+  // Open curation reviews on the Content page (core/jarvis_core/api/context_reviews.py).
+  context_reviews: z.number().int().nonnegative(),
 });
 export type Attention = z.infer<typeof Attention>;
 
@@ -93,3 +95,28 @@ export type Reel = z.infer<typeof Reel>;
 
 export const ReelList = z.strictObject({ reels: z.array(Reel) });
 export const ReelSubmitResult = z.strictObject({ reel: Reel, created: z.boolean() });
+
+// Context reviews (core/jarvis_core/api/context_reviews.py). Text fields are external content
+// from reels: rendered as plain text only, never as HTML or links other than source_refs.
+export const ContextReview = z.strictObject({
+  brief_id: z.string().regex(/^br:[0-9a-f]{24}$/),
+  category: z.string().regex(/^[a-z0-9-]{1,40}$/),
+  proposal: z.enum(["store", "merge", "discard"]),
+  confidence: z.number().min(0).max(1),
+  title: z.string().min(1).max(200),
+  summary: z.string().min(1).max(1500),
+  facts: z.array(z.string().max(300)).max(10),
+  reasons: z.array(z.string().max(300)).max(8),
+  flags: z.array(z.string().max(300)).max(10),
+  source_refs: z.array(z.string().max(500)).max(10),
+  received_at: z.iso.datetime({ offset: true }),
+  decided_at: z.iso.datetime({ offset: true }).nullable(),
+  accepted: z.boolean().nullable(),
+});
+export type ContextReview = z.infer<typeof ContextReview>;
+
+export const ContextReviewList = z.strictObject({
+  open: z.array(ContextReview),
+  recent: z.array(ContextReview),
+});
+export const ContextReviewResult = z.strictObject({ review: ContextReview });
