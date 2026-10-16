@@ -81,6 +81,29 @@ buy_and_hold          10.96%    4.93%    5.81%    0.60   11.18%
 
 Daily bars: any CSV in the format above works, for example an export of SPY's daily history. The live feed records 1-minute bars under `<data-dir>/bars/` for intraday backtests.
 
+### On real data
+
+S&P 500 monthly closes 1990-01 to 2026-09 (price index without dividends, from the public dataset `datasets/s-and-p-500` on GitHub), `--trend 10 --vol-window 6 --step 0.001 --compare`, so roughly the 200-day rule on monthly bars:
+
+```
+signal on the instrument (compounding, no account limits):
+                      return     CAGR      vol  Sharpe   max DD
+trend_vol_target    1428.05%    7.72%    8.03%    0.97   19.23%
+buy_and_hold        2152.07%    8.87%   12.26%    0.76   50.82%
+```
+
+About one percentage point of yearly return given up for less than half of the worst loss and a better Sharpe ratio. On the paper account the same run stays far smaller (CAGR 1.5 %), because the risk limits cap the position at 2500 and the strategy keeps its capital fixed instead of compounding; that is intended until the limits are raised by a human. Daily SPY data from `history` will replace the monthly proxy.
+
+## Research gate
+
+Ideas from research agents (market researcher, earnings reviewer) are signals: a weight between 0 and 1 per bar, written as CSV `ts,weight`. Before a signal may trade on paper, `research-gate` compares it with the trend-vol baseline on the same bars, both as compounding weight curves with the same costs:
+
+```bash
+python -m mod_trading research-gate --bars spy-daily.csv --signal idea.csv --instrument SPY
+```
+
+It is accepted only if its Sharpe ratio beats the baseline's by at least 0.10 on the whole period and on the second half (out of sample), and its drawdown is at most 5 points worse. Exit code 0 means accepted, 1 rejected (with reasons), 2 an invalid signal (weights outside 0 to 1, bars without a weight). Buying and holding fails it, and so does the baseline itself; deterministic code decides, no model. An accepted signal still trades only through the normal order path.
+
 ## Live market data
 
 `paper-live` trades the same paper account on live 1-minute bars instead of a CSV:

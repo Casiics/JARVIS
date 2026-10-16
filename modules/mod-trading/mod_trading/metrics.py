@@ -68,9 +68,13 @@ def buy_and_hold(
 
 
 def bars_per_year(bars: Sequence[Bar]) -> int:
-    """252 for daily bars; for intraday bars, how many fit into 252 regular 6.5-hour sessions."""
+    """252 for daily bars, 52 weekly, 12 monthly; intraday: bars in 252 sessions of 6.5 h."""
     gaps = sorted((b.ts - a.ts).total_seconds() for a, b in itertools.pairwise(bars) if b.ts > a.ts)
     if not gaps:
         return 252
     median = gaps[len(gaps) // 2]
-    return 252 if median >= 20 * 3600 else max(252, round(252 * 23_400 / median))
+    if median < 20 * 3600:
+        return max(252, round(252 * 23_400 / median))
+    if median < 4 * 86_400:
+        return 252
+    return max(1, round(SECONDS_PER_YEAR / median))

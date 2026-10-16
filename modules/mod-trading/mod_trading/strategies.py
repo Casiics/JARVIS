@@ -144,7 +144,10 @@ class TrendVolTarget:
         if gap == 0 or (target > 0 and abs(gap) * price < self.band * self.capital):
             return []
         side = Side.BUY if gap > 0 else Side.SELL
-        per_order = (self.max_order_notional / price).quantize(self.quantity_step, ROUND_DOWN)
+        # 1 % headroom: orders fill at the ask plus slippage, not at the close sized here.
+        per_order = (self.max_order_notional * Decimal("0.99") / price).quantize(
+            self.quantity_step, ROUND_DOWN
+        )
         if per_order <= 0:
             return []
         reason = f"weight {weight:.2f}, target {target}, held {held}"

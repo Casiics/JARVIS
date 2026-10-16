@@ -135,6 +135,12 @@ def test_bar_frequency_is_inferred() -> None:
         for i in range(3)
     ]  # fmt: skip
     assert bars_per_year(minutes) == 252 * 390
+    monthly = [
+        Bar(instrument="SPY", ts=DAY0 + timedelta(days=30.4 * i), open=Decimal(1),
+            high=Decimal(1), low=Decimal(1), close=Decimal(1))
+        for i in range(4)
+    ]  # fmt: skip
+    assert bars_per_year(monthly) == 12
 
 
 def write_csv(path: Path, bars: list[Bar]) -> Path:
