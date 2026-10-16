@@ -49,8 +49,40 @@ def test_reel_allowlist_covers_the_sandbox_hosts() -> None:
         assert covers(allowlist("reel"), host), host
 
 
-def test_trading_has_no_egress_before_phase_6() -> None:
-    assert allowlist("trading") == []
+WORKFLOWS = POLICIES.parent / "core" / "n8n-workflows"
+URL_HOST = re.compile(r"https://([a-z0-9.-]+)/")
+
+
+def workflow_nodes(domain: str) -> list[dict[str, object]]:
+    nodes: list[dict[str, object]] = []
+    for path in sorted(WORKFLOWS.glob(f"{domain}-*.json")):
+        for workflow in json.loads(path.read_text()):
+            assert workflow["active"] is False, f"{path.name}: committed workflows start inactive"
+            nodes.extend(workflow["nodes"])
+    return nodes
+
+
+def test_trading_egress_is_exactly_its_workflow_hosts() -> None:
+    hosts = {
+        match
+        for node in workflow_nodes("trading")
+        for match in URL_HOST.findall(json.dumps(node.get("parameters", {})))
+    }
+    assert hosts, "no trading workflow calls out"
+    entries = allowlist("trading")
+    for host in hosts:
+        assert covers(entries, host), f"{host} is not on trading.allow"
+    for entry in entries:
+        assert any(covers([entry], host) for host in hosts), f"{entry} is allowed but unused"
+
+
+@pytest.mark.parametrize("domain", ["trading"])
+def test_mcp_tool_data_matches_the_committed_workflows(domain: str) -> None:
+    tools = json.loads((POLICIES / "mcp-tools" / f"{domain}.json").read_text())["domain_tools"]
+    nodes = workflow_nodes(domain)
+    triggers = [n for n in nodes if n["type"] == "@n8n/n8n-nodes-langchain.mcpTrigger"]
+    assert sorted(tools["endpoints"]) == sorted(n["parameters"]["path"] for n in triggers)  # type: ignore[index]
+    assert sorted(tools["tools"]) == sorted(str(n["name"]) for n in nodes if n not in triggers)
 
 
 @pytest.mark.parametrize("domain", ["trading", "content", "private"])

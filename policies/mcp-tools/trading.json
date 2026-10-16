@@ -1,7 +1,12 @@
 {
   "domain_tools": {
     "domain": "trading",
-    "endpoints": [],
-    "tools": []
+    "endpoints": [
+      "marketdata"
+    ],
+    "tools": [
+      "get_bars",
+      "get_daily"
+    ]
   }
 }
