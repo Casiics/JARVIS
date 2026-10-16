@@ -13,6 +13,7 @@ import {
   Me,
   ReelList,
   ReelSubmitResult,
+  TaskList,
 } from "./schemas";
 
 export class ApiError extends Error {
@@ -51,6 +52,8 @@ export const getReels = (): Promise<z.infer<typeof ReelList>> =>
   request(ReelList, "/api/content/reels");
 export const submitReel = (url: string): Promise<z.infer<typeof ReelSubmitResult>> =>
   request(ReelSubmitResult, "/api/content/reels", { url });
+
+export const getTasks = (): Promise<z.infer<typeof TaskList>> => request(TaskList, "/api/tasks");
 
 const Ok = z.looseObject({});
 

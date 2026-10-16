@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { getMe } from "./api";
 import { DASHBOARDS } from "./dashboards";
+import { Agents } from "./pages/Agents";
 import { Content } from "./pages/Content";
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
@@ -32,7 +33,8 @@ export function App() {
       <Route element={<Shell onSignedOut={check} />}>
         <Route index element={<Home />} />
         <Route path="content" element={<Content />} />
-        {DASHBOARDS.filter((d) => d.path !== "/" && d.path !== "/content").map((d) => (
+        <Route path="agents" element={<Agents />} />
+        {DASHBOARDS.filter((d) => d.dataPhase !== null).map((d) => (
           <Route key={d.path} path={d.path.slice(1)} element={<Placeholder dashboard={d} />} />
         ))}
         <Route path="*" element={<p className="empty">Diese Ansicht gibt es nicht.</p>} />
