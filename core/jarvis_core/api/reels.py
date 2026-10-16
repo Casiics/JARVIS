@@ -79,6 +79,15 @@ class ReelDesk:
         self._items: dict[UUID, ReelSubmission] = {}
         if path is not None and path.exists():
             self._items = {s.task_id: s for s in _SUBMISSIONS.validate_json(path.read_bytes())}
+        # Reels queued before the orchestrator took over intake: let it track them, so their
+        # reports still arrive and a silent worker still escalates them.
+        for submission in self._items.values():
+            if submission.status in _OPEN and orchestrator.get(submission.task_id) is None:
+                orchestrator.adopt(
+                    submission.task_id,
+                    ReelGoal(source_ref=submission.source_ref),
+                    submission.submitted_at,
+                )
 
     def submit(self, url: str) -> tuple[ReelSubmission, bool]:
         """Queue a reel. Returns the submission and whether it is new.
