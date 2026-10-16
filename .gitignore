@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+# Generated on the server by scripts/secrets-bootstrap.sh; holds only public age recipients,
+# but stays local so each installation keeps its own keys.
+.sops.yaml
+# Never commit decrypted secrets or age keys.
+*.key
+.env
+.env.*

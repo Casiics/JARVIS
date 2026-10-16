@@ -16,15 +16,19 @@
       "Edit(mcp-servers/**)",
       "Edit(skills/**)",
       "Edit(tests/**)",
-      "Edit(docs/**)"
+      "Edit(docs/**)",
+      "Edit(scripts/**)",
+      "Edit(pyproject.toml)"
     ],
     "ask": [
-      "Edit(core/deterministic-gate/**)",
+      "Edit(core/jarvis_core/policy/**)",
+      "Edit(core/jarvis_core/gate/**)",
+      "Edit(core/jarvis_core/router/policy.py)",
+      "Edit(core/jarvis_core/audit/**)",
       "Edit(modules/mod-trading/risk/**)",
-      "Edit(core/model-router/policy/**)",
       "Edit(policies/**)",
-      "Edit(core/audit/**)",
       "Edit(docker/**)",
+      "Edit(secrets/**)",
       "Edit(.github/**)",
       "Edit(.claude/**)",
       "Edit(CLAUDE.md)"
@@ -35,7 +39,10 @@
       "Read(**/secrets/**)",
       "Bash(git push --force*)",
       "Bash(git push * main)",
-      "Bash(rm -rf /)*"
+      "Bash(rm -rf /)*",
+      "Read(**/*.key)",
+      "Bash(sops -d*)",
+      "Bash(sops --decrypt*)"
     ]
   },
   "hooks": {

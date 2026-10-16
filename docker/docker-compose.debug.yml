@@ -1,0 +1,6 @@
+# Local debugging only: exposes the core databases on 127.0.0.1. Never use on the homelab server.
+services:
+  pg-core:
+    ports: ["127.0.0.1:5432:5432"]
+  pg-audit:
+    ports: ["127.0.0.1:5433:5432"]

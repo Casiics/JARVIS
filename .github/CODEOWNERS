@@ -1,11 +1,13 @@
 # Protected paths: guardrails that self-improvement agents must never change.
 # Combine with branch protection on main ("Require review from Code Owners").
-/core/deterministic-gate/   @Casiics
-/modules/mod-trading/risk/  @Casiics
-/core/model-router/policy/  @Casiics
-/policies/                  @Casiics
-/core/audit/                @Casiics
-/docker/                    @Casiics
-/.github/                   @Casiics
-/.claude/                   @Casiics
-/CLAUDE.md                  @Casiics
+/core/jarvis_core/policy/                 @Casiics
+/core/jarvis_core/gate/                   @Casiics
+/core/jarvis_core/router/policy.py        @Casiics
+/core/jarvis_core/audit/                  @Casiics
+/modules/mod-trading/risk/                @Casiics
+/policies/                                @Casiics
+/docker/                                  @Casiics
+/secrets/                                 @Casiics
+/.github/                                 @Casiics
+/.claude/                                 @Casiics
+/CLAUDE.md                                @Casiics
