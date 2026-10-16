@@ -182,6 +182,8 @@ What enters a domain's long-term context passes four deterministic stages (`jarv
 
 No stage calls a model. Every stage writes ids and hashes to the audit chain. Open reviews can be decided in the deck (section 5.3); material above INTERNAL stays a terminal review. Curated entries stay in the domain's own store; nothing is shared across domains. See `docs/runbooks/context-curation.md`.
 
+Agents read curated context only as a named work-order input (`jarvis_core.curation.context_input`): the domain selects entries from its own store under a label ceiling, renders them as a pack marked as data, and `with_context` attaches it only if the task token's domain matches, the order's label is at least the strictest included entry, and external-derived context goes to a tainted task token.
+
 ### 6.3 Trading idea to order
 
 1. A proposal lands in the trading inbox; trading decides whether to pursue it.
