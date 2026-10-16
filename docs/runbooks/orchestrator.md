@@ -24,6 +24,14 @@ Tasks persist in `<data-dir>/tasks.json`. Every two seconds it reads the domains
 
 ## Check
 
+From the terminal (read-only, safe next to the running gateway; for `scripts/deck-local.sh` the data dir is `~/.local/share/jarvis-deck-local/data`):
+
+```bash
+uv run python -m jarvis_core.orchestrator --data-dir ~/.local/share/jarvis-deck-local/data status
+```
+
+In the deck, **Agenten** shows the swarm, every task's stage and the escalations; failed reels can be queued again from there in one click (`POST /api/content/reels/retry`).
+
 - Deck: the live view shows each task's transitions (`/ws/telemetry`); `GET /api/tasks` lists the last 100 tasks as metadata (kind, domain, state, duration, error class). Goals themselves are kept as SHA-256 only.
 - A task stuck in `planned`: the domain worker is not running or not reading the same `--boundary-dir`.
 - A task escalated with `timeout`: the domain stopped reporting; check the worker's log.
