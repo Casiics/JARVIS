@@ -43,6 +43,21 @@ The GPU must be visible to the sandbox: with Podman via the NVIDIA Container Too
 
 ## Processing reels
 
+### From the deck
+
+On the deck's **Content** page, paste a reel link (Instagram: Share → Copy link) and press **Verarbeiten**. The API gateway checks the link, keeps only the canonical form, and puts a `ReelSubmitted` event into the core-to-content mailbox. The reel worker picks it up, runs the pipeline below and sends back status only (`TaskMetadata`: state, duration, error class). The list shows each reel as waiting, running, done, needing you, or failed. A failed reel can be submitted again; any other reel already in the list is not queued twice. At most 20 reels wait at a time.
+
+```bash
+# The worker for deck submissions; same options as ingest. --boundary-dir must match the
+# API gateway's (default /var/lib/jarvis/boundary).
+uv run python -m mod_content.reel serve
+```
+
+On one host, the gateway and the worker share `/var/lib/jarvis/boundary`. With separate users, give `core-to-content/` to the gateway's user and `content-to-core/` to the worker's, each readable and deletable by the other through a shared group.
+
+### From the command line
+
+
 ```bash
 uv run python -m mod_content.reel ingest https://www.instagram.com/reel/<code>/
 uv run python -m mod_content.reel ingest --from-file reels.txt     # one URL per line, # comments
@@ -74,5 +89,5 @@ Downloaded media and audio are deleted after each run unless `--keep-media` is s
 - **Egress** is enforced since Phase 4: `jarvis-sandbox-egress` is internal, and its only way out is `egress-reel`, which allows HTTPS to the Instagram hosts in `policies/egress/reel.allow` and nothing else.
 - **Supervisor QA is rule-based.** The content supervisor is meant to be a cloud model; that needs the cloud client and keys. The `Supervisor` interface is in place.
 - **Task tokens are issued by the CLI itself** with an ephemeral key, because the core task router is not a service yet. Every step is still checked against the token.
-- **Telegram intake** goes through `n8n-content` (Phase 4). Its egress to `api.telegram.org` is allowed, but a workflow that hands URLs to the pipeline does not exist yet; until then URLs are passed to the CLI.
+- **Telegram intake** goes through `n8n-content` (Phase 4). Its egress to `api.telegram.org` is allowed, but a workflow that hands URLs to the pipeline does not exist yet; until then reels come from the deck or the CLI.
 - Instagram changes its pages often. When downloads start failing with `fetch_failed`, rebuild the media image with a current `YTDLP_VERSION`.

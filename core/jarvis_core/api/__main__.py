@@ -12,6 +12,7 @@ net-gateway only.
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 from pathlib import Path
 
 import uvicorn
@@ -19,7 +20,9 @@ import uvicorn
 from jarvis_core.api.app import GatewayDeps, GatewaySettings, create_app
 from jarvis_core.api.auth import sha256_hex
 from jarvis_core.api.filestore import FileApprovalStore, FileCredentialStore
+from jarvis_core.api.reels import ReelDesk
 from jarvis_core.audit.chain import AuditStore, AuditWriter, InMemoryAuditStore
+from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.secrets.provider import UnpackedSopsProvider
 
@@ -34,6 +37,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--secrets-root", type=Path, default=Path("/run/jarvis/secrets"))
     parser.add_argument("--data-dir", type=Path, default=Path("/var/lib/jarvis/core/deck"))
     parser.add_argument("--audit-dsn", default=None, help="pg-audit writer DSN")
+    parser.add_argument(
+        "--boundary-dir",
+        type=Path,
+        default=Path("/var/lib/jarvis/boundary"),
+        help="mailboxes shared with the domain processes (reel intake)",
+    )
     args = parser.parse_args(argv)
 
     secrets = UnpackedSopsProvider(Domain.CORE, root=args.secrets_root)
@@ -50,6 +59,11 @@ def main(argv: list[str] | None = None) -> None:
         credentials=FileCredentialStore(args.data_dir / "credentials.json"),
         approvals=FileApprovalStore(args.data_dir / "approvals.json"),
         audit=AuditWriter(_audit_store(args.audit_dsn)).write,
+        reels=ReelDesk(
+            Mailbox(args.boundary_dir, Domain.CORE),
+            args.data_dir / "reels.json",
+            clock=lambda: datetime.now(UTC),
+        ),
     )
     uvicorn.run(create_app(settings, deps), host=args.host, port=args.port, proxy_headers=True)
 

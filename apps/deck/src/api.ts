@@ -11,6 +11,8 @@ import {
   CeremonyStart,
   DecisionResult,
   Me,
+  ReelList,
+  ReelSubmitResult,
 } from "./schemas";
 
 export class ApiError extends Error {
@@ -44,6 +46,11 @@ export const getMe = (): Promise<Me> => request(Me, "/api/me");
 export const getAttention = (): Promise<Attention> => request(Attention, "/api/attention");
 export const getApproval = (id: string): Promise<ApprovalDetail> =>
   request(ApprovalDetail, `/api/approvals/${encodeURIComponent(id)}`);
+
+export const getReels = (): Promise<z.infer<typeof ReelList>> =>
+  request(ReelList, "/api/content/reels");
+export const submitReel = (url: string): Promise<z.infer<typeof ReelSubmitResult>> =>
+  request(ReelSubmitResult, "/api/content/reels", { url });
 
 const Ok = z.looseObject({});
 

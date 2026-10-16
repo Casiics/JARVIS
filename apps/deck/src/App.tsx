@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { getMe } from "./api";
 import { DASHBOARDS } from "./dashboards";
+import { Content } from "./pages/Content";
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
 import { Placeholder } from "./pages/Placeholder";
@@ -30,7 +31,8 @@ export function App() {
     <Routes>
       <Route element={<Shell onSignedOut={check} />}>
         <Route index element={<Home />} />
-        {DASHBOARDS.filter((d) => d.path !== "/").map((d) => (
+        <Route path="content" element={<Content />} />
+        {DASHBOARDS.filter((d) => d.path !== "/" && d.path !== "/content").map((d) => (
           <Route key={d.path} path={d.path.slice(1)} element={<Placeholder dashboard={d} />} />
         ))}
         <Route path="*" element={<p className="empty">Diese Ansicht gibt es nicht.</p>} />

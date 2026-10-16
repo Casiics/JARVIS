@@ -128,7 +128,7 @@ Missing or unknown labels are treated as `PRIVATE`. Anything originating in the 
 
 1. **No direct connection between domains.** Networks, database instances and credentials are separate.
 2. **Upgrading is allowed, downgrading is not.** A public reel may become a proposal in the private inbox; private content never leaves the private domain.
-3. **Crossings are typed events, checked by core** (`core/jarvis_core/policy/flows.py`). No free text or prompts cross domains.
+3. **Crossings are typed events, checked by core** (`core/jarvis_core/policy/flows.py`). No free text or prompts cross domains. Between processes on one host they travel through file mailboxes, one directory per direction (`core/jarvis_core/boundary/mailbox.py`); the receiver takes the sender from the directory, not the payload, and checks the flow again.
 4. **Proposals, not writes.** Content can only place proposals in the trading and private inboxes; the target domain decides.
 5. **Fail closed.**
 6. **External content is data, not instructions.** Reels, emails and web pages are read by a quarantined worker without tools that returns only a typed object.
@@ -138,6 +138,7 @@ Missing or unknown labels are treated as `PRIVATE`. Anything originating in the 
 | From → to | Allowed | Form |
 |---|---|---|
 | Core → any domain | Yes | Signed task token |
+| Core → content | Yes | `ReelSubmitted` (canonical reel link and task id) when the owner submits a reel in the deck; content reports back with `TaskMetadata` only |
 | Any domain → core | Yes | Result object, audit entry, metadata-only telemetry |
 | Content → trading | As proposal | `TradingIdeaProposed` into the trading inbox |
 | Content → private | As proposal | `LifeTipProposed` into the private inbox |

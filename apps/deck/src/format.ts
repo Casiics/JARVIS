@@ -22,3 +22,17 @@ export const STATE_LABEL: Record<string, string> = {
   done: "fertig",
   escalated: "eskaliert",
 };
+
+export const REEL_STATUS_LABEL: Record<string, string> = {
+  queued: "wartet auf den Worker",
+  running: "wird verarbeitet",
+  done: "fertig",
+  awaiting_action: "braucht dich",
+  failed: "fehlgeschlagen",
+};
+
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return "";
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? `${String(seconds)} s` : `${String(Math.floor(seconds / 60))} min ${String(seconds % 60)} s`;
+}
