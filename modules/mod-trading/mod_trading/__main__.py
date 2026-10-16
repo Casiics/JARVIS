@@ -47,6 +47,8 @@ from mod_trading.session import SessionReport, run_session
 from mod_trading.strategies import SmaCrossover, Strategy, TrendVolTarget
 from trading_risk import KillSwitch, RiskEngine, RiskLimits
 
+# The live feed delivers 1-minute bars of the regular session: 390 a day, 252 days a year.
+LIVE_BARS_PER_YEAR = 252 * 390
 DEFAULT_LIMITS = Path(__file__).resolve().parents[1] / "risk" / "limits.json"
 
 
@@ -93,11 +95,11 @@ def print_report(report: SessionReport) -> None:
 
 def session(args: argparse.Namespace, *, persistent: bool) -> int:
     clock = SimClock()
-    built = _executor(args, clock, persistent=persistent)
+    bars = read_bars(args.bars)
+    built = _executor(args, clock, persistent=persistent, bar_frequency=bars_per_year(bars))
     if built is None:
         return 3
     executor, strategy = built
-    bars = read_bars(args.bars)
     report = run_session(replay(bars, args.spread_bps), strategy, executor, claims, clock.set)
     print_report(report)
     if getattr(args, "compare", False) and len(report.equity) >= 2:
@@ -160,7 +162,11 @@ def live(args: argparse.Namespace) -> int:
 
 
 def _executor(
-    args: argparse.Namespace, clock: Callable[[], datetime], *, persistent: bool
+    args: argparse.Namespace,
+    clock: Callable[[], datetime],
+    *,
+    persistent: bool,
+    bar_frequency: int = LIVE_BARS_PER_YEAR,
 ) -> tuple[OrderExecutor, Strategy] | None:
     tz = ZoneInfo(args.tz)
     limits = load_limits(args.limits)
@@ -200,6 +206,7 @@ def _executor(
             max_order_notional=min(args.capital, limits.max_order_notional),
             max_orders_per_bar=limits.max_orders_per_minute,
             quantity_step=args.step,
+            bars_per_year=args.bars_per_year or bar_frequency,
         )
     else:
         strategy = SmaCrossover(
@@ -245,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
         run.add_argument("--vol-window", type=int, default=20, help="trend-vol: returns")
         run.add_argument("--target-vol", type=float, default=0.10, help="trend-vol: annual")
         run.add_argument("--capital", type=Decimal, default=Decimal(2400), help="trend-vol")
+        run.add_argument(
+            "--bars-per-year",
+            type=int,
+            default=None,
+            help="trend-vol: annualisation; inferred from the bars, 98280 for paper-live",
+        )
         if name == "backtest":
             run.add_argument(
                 "--compare", action="store_true", help="compare with buy-and-hold of --capital"
