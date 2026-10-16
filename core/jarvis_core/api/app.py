@@ -67,6 +67,7 @@ from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntr
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.reel_url import InvalidReelUrl
 from jarvis_core.contracts.telemetry import TelemetryEvent
+from jarvis_core.orchestrator.service import Orchestrator, TaskRecord
 
 SESSION_COOKIE = "jarvis_session"
 AuditSink = Callable[[AuditLogEntry], object]
@@ -125,6 +126,7 @@ class GatewayDeps:
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     bootstrap_used: bool = False
     reels: ReelDesk | None = None
+    orchestrator: Orchestrator | None = None
 
 
 # --- request bodies ---------------------------------------------------------------------------
@@ -456,6 +458,16 @@ def create_app(settings: GatewaySettings, deps: GatewayDeps) -> FastAPI:
         response.status_code = 201 if created else 200
         return {"reel": _reel(submission), "created": created}
 
+    # --- orchestrator ---------------------------------------------------------------------
+
+    @app.get("/api/tasks")
+    def list_tasks(request: Request) -> dict[str, Any]:
+        session_of(request)
+        if deps.orchestrator is None:
+            raise HTTPException(503, "the orchestrator is not configured")
+        deps.orchestrator.tick()
+        return {"tasks": [_task(t) for t in deps.orchestrator.tasks()[:100]]}
+
     # --- telemetry -----------------------------------------------------------------------
 
     @app.websocket("/ws/telemetry")
@@ -560,6 +572,20 @@ def _reel(submission: ReelSubmission) -> dict[str, Any]:
         "updated_at": submission.updated_at.isoformat(),
         "duration_ms": submission.duration_ms,
         "error_class": submission.error_class,
+    }
+
+
+def _task(record: TaskRecord) -> dict[str, Any]:
+    """Metadata only: the goal itself stays behind its hash."""
+    return {
+        "task_id": str(record.task_id),
+        "kind": record.kind,
+        "domain": record.domain.value,
+        "state": record.state.value,
+        "created_at": record.created_at.isoformat(),
+        "updated_at": record.updated_at.isoformat(),
+        "duration_ms": record.duration_ms,
+        "error_class": record.error_class,
     }
 
 

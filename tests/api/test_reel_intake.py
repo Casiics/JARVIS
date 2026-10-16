@@ -17,6 +17,7 @@ from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditAction
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import ReelSubmitted, TaskMetadata
+from jarvis_core.orchestrator.service import Orchestrator
 from tests.api.test_deck_approvals import ORIGIN, Deck
 
 URL = "https://www.instagram.com/reel/ABCDE12345/?igsh=share-tracking"
@@ -26,10 +27,15 @@ CANONICAL = "https://www.instagram.com/reel/ABCDE12345/"
 @pytest.fixture
 def deck(tmp_path: Path) -> Deck:
     d = Deck()
-    d.deps.reels = ReelDesk(
+    d.deps.orchestrator = Orchestrator(
         Mailbox(tmp_path / "boundary", Domain.CORE),
-        tmp_path / "core/reels.json",
+        tmp_path / "core/tasks.json",
         clock=lambda: datetime.now(UTC),
+        audit=d.audit.append,
+        telemetry=d.deps.telemetry.publish,
+    )
+    d.deps.reels = ReelDesk(
+        d.deps.orchestrator, tmp_path / "core/reels.json", clock=lambda: datetime.now(UTC)
     )
     d.register()
     d.login()
@@ -64,9 +70,11 @@ def test_submitting_a_reel_sends_one_canonical_event_to_content(deck: Deck, tmp_
     assert isinstance(letter.event, ReelSubmitted)
     assert letter.event.source_ref == CANONICAL
     assert str(letter.event.task_id) == reel["task_id"]
-    [entry] = [e for e in deck.audit if e.action is AuditAction.BOUNDARY_EVENT]
-    assert entry.target == "content:reel_submitted" and entry.content_hash
-    assert CANONICAL not in entry.model_dump_json()  # the audit log holds hashes only
+    targets = [e.target for e in deck.audit if e.action is AuditAction.BOUNDARY_EVENT]
+    assert targets == ["dispatch:reel->content", "content:reel_submitted"]
+    entry = next(e for e in deck.audit if e.target == "content:reel_submitted")
+    assert entry.content_hash
+    assert all(CANONICAL not in e.model_dump_json() for e in deck.audit)  # hashes only
 
 
 def test_the_same_reel_is_queued_once(deck: Deck, tmp_path: Path) -> None:
@@ -135,12 +143,14 @@ def test_open_reels_are_capped(deck: Deck, tmp_path: Path, monkeypatch: pytest.M
 
 def test_submissions_survive_a_restart(deck: Deck, tmp_path: Path) -> None:
     deck.post("/api/content/reels", {"url": URL})
-    again = ReelDesk(
-        Mailbox(tmp_path / "boundary", Domain.CORE),
-        tmp_path / "core/reels.json",
-        clock=lambda: datetime.now(UTC),
+    clock = lambda: datetime.now(UTC)  # noqa: E731
+    orchestrator = Orchestrator(
+        Mailbox(tmp_path / "boundary", Domain.CORE), tmp_path / "core/tasks.json", clock=clock
     )
+    again = ReelDesk(orchestrator, tmp_path / "core/reels.json", clock=clock)
     assert [s.source_ref for s in again.all()] == [CANONICAL]
+    [task] = orchestrator.tasks()
+    assert task.kind == "reel" and task.domain is Domain.CONTENT
 
 
 def test_without_a_mailbox_the_intake_says_so() -> None:
@@ -148,3 +158,14 @@ def test_without_a_mailbox_the_intake_says_so() -> None:
     d.register()
     d.login()
     assert d.client.get("/api/content/reels").status_code == 503
+
+
+def test_the_deck_lists_orchestrator_tasks_as_metadata(deck: Deck, tmp_path: Path) -> None:
+    task_id = deck.post("/api/content/reels", {"url": URL}).json()["reel"]["task_id"]
+    report(tmp_path, task_id, "running")
+    res = deck.client.get("/api/tasks")
+    assert res.status_code == 200
+    [task] = res.json()["tasks"]
+    assert task["task_id"] == task_id and task["domain"] == "content"
+    assert task["kind"] == "reel" and task["state"] == "running"
+    assert CANONICAL not in res.text  # the goal stays behind its hash

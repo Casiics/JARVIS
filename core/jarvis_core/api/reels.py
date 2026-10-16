@@ -1,8 +1,9 @@
 """Reel intake from the deck: the owner submits a reel link, content processes it.
 
-Core never touches content's data. It sends a ReelSubmitted event through the core-to-content
-mailbox and learns progress only from TaskMetadata that content sends back (state, duration,
-error class). What core keeps is its own record of what the owner submitted.
+Core never touches content's data. The desk hands each reel to core's orchestrator, which
+sends the ReelSubmitted event through the core-to-content mailbox and learns progress only from
+the TaskMetadata content sends back (state, duration, error class). What the desk keeps is its
+own record of what the owner submitted; the task's state comes from the orchestrator.
 """
 
 from __future__ import annotations
@@ -12,15 +13,14 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from jarvis_core.api.filestore import write_atomic
-from jarvis_core.boundary.mailbox import Mailbox
-from jarvis_core.contracts.classification import DataClassification, Domain
-from jarvis_core.contracts.events import ReelSubmitted, TaskMetadata
 from jarvis_core.contracts.reel_url import canonical_reel_url
+from jarvis_core.orchestrator.service import Orchestrator, ReelGoal, TaskRecord
+from jarvis_core.orchestrator.state_machine import TaskState
+from jarvis_core.storage import write_atomic
 
 MAX_OPEN = 20
 
@@ -34,9 +34,10 @@ class ReelStatus(StrEnum):
 
 
 _FROM_TASK_STATE = {
-    "done": ReelStatus.DONE,
-    "awaiting_action": ReelStatus.AWAITING_ACTION,
-    "escalated": ReelStatus.FAILED,
+    TaskState.PLANNED: ReelStatus.QUEUED,
+    TaskState.DONE: ReelStatus.DONE,
+    TaskState.AWAITING_ACTION: ReelStatus.AWAITING_ACTION,
+    TaskState.ESCALATED: ReelStatus.FAILED,
 }
 _OPEN = frozenset({ReelStatus.QUEUED, ReelStatus.RUNNING})
 
@@ -67,13 +68,11 @@ class TooManyOpenReels(Exception):
 class ReelDesk:
     def __init__(
         self,
-        mailbox: Mailbox,
+        orchestrator: Orchestrator,
         path: Path | None,
         clock: Callable[[], datetime],
     ) -> None:
-        if mailbox.me is not Domain.CORE:
-            raise ValueError("the reel desk runs in core")
-        self._mailbox = mailbox
+        self._orchestrator = orchestrator
         self._path = path
         self._clock = clock
         self._lock = threading.Lock()
@@ -93,40 +92,28 @@ class ReelDesk:
                     return existing, False
             if sum(s.status in _OPEN for s in self._items.values()) >= MAX_OPEN:
                 raise TooManyOpenReels
-            now = self._clock()
+            record = self._orchestrator.submit(ReelGoal(source_ref=source_ref))
             submission = ReelSubmission(
-                task_id=uuid4(), source_ref=source_ref, submitted_at=now, updated_at=now
-            )
-            self._mailbox.send(
-                ReelSubmitted(
-                    origin_domain=Domain.CORE,
-                    target_domain=Domain.CONTENT,
-                    classification=DataClassification.INTERNAL,
-                    task_id=submission.task_id,
-                    source_ref=source_ref,
-                )
+                task_id=record.task_id,
+                source_ref=source_ref,
+                submitted_at=record.created_at,
+                updated_at=record.created_at,
             )
             self._items[submission.task_id] = submission
             self._save()
             return submission, True
 
     def sync(self) -> None:
-        """Apply the status reports content sent back since the last call."""
+        """Pull the latest task states from the orchestrator."""
+        self._orchestrator.tick()
         with self._lock:
             changed = False
-            for letter in self._mailbox.receive(Domain.CONTENT):
-                event = letter.event
-                if isinstance(event, TaskMetadata) and event.task_id in self._items:
-                    self._items[event.task_id] = self._items[event.task_id].model_copy(
-                        update={
-                            "status": _FROM_TASK_STATE.get(event.state, ReelStatus.RUNNING),
-                            "updated_at": event.created_at,
-                            "duration_ms": event.duration_ms,
-                            "error_class": event.error_class,
-                        }
-                    )
-                    changed = True
-                self._mailbox.ack(letter)
+            for task_id, submission in list(self._items.items()):
+                record = self._orchestrator.get(task_id)
+                if record is None or record.updated_at == submission.updated_at:
+                    continue
+                self._items[task_id] = _merge(submission, record)
+                changed = True
             if changed:
                 self._save()
 
@@ -137,3 +124,14 @@ class ReelDesk:
     def _save(self) -> None:
         if self._path is not None:
             write_atomic(self._path, _SUBMISSIONS.dump_json(list(self._items.values())))
+
+
+def _merge(submission: ReelSubmission, record: TaskRecord) -> ReelSubmission:
+    return submission.model_copy(
+        update={
+            "status": _FROM_TASK_STATE.get(record.state, ReelStatus.RUNNING),
+            "updated_at": record.updated_at,
+            "duration_ms": record.duration_ms,
+            "error_class": record.error_class,
+        }
+    )
