@@ -17,10 +17,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from jarvis_core.api.filestore import write_atomic
 from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import ContextReviewDecided, ContextReviewRequested
+from jarvis_core.storage import write_atomic
 
 MAX_KEPT_DECIDED = 50
 
