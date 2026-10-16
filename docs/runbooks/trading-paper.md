@@ -55,10 +55,49 @@ Limits: edit `modules/mod-trading/risk/limits.json`. It is a protected path, so 
 
 Ideas from the content domain (`TradingIdeaProposed`) enter through the boundary policy and keep their taint (`mod_trading.inbox`). `python -m mod_trading ideas` lists them. They are notes for review and have no path to the executor.
 
+## Live market data
+
+`paper-live` trades the same paper account on live 1-minute bars instead of a CSV:
+
+```
+mod_trading (net-trading) ──MCP──▶ mcp-gateway-trading ──▶ n8n-trading ──▶ egress-trading ──▶ query1.finance.yahoo.com
+                                   (OPA: endpoint marketdata,  workflow       (trading.allow)
+                                    tool get_bars only)        get_bars
+```
+
+- **Provider:** Yahoo Finance's chart endpoint. It needs no account and no key and covers SPY, QQQ, IWM and most listed symbols, but it is unofficial: it can change or rate-limit without notice. The parser is the only provider-specific code (`mod_trading.marketdata.parse_chart`), so a keyed provider can replace it later.
+- **Who calls out:** only n8n-trading, through egress-trading. `policies/egress/trading.allow` holds exactly the hosts the committed trading workflows call (`tests/config/test_policies.py` checks both directions).
+- **What is checked:** the answer is untrusted. It is size-capped and parsed with strict models. One inconsistent bar (high below low, wrong symbol or bar size, columns of different length, out of order) refuses the whole answer, and n8n's error text is never passed on. The bar that is still forming is dropped.
+- **Time:** live sessions run on the wall clock. A bar's quote is as old as its close, so data that stops arriving fails the risk engine's quote-age limit (`max_quote_age_s`) instead of trading on old prices.
+- **Start of a session:** the first poll returns today's bars so far. They prime the strategy's averages; intents on them are dropped. After that, each new closed bar goes through the normal order path.
+- **Recording:** every traded bar is appended to `<data-dir>/bars/<instrument>-<date>.csv`, which `backtest --bars` reads directly.
+
+### One-time setup
+
+```bash
+# 1. Import the workflow into n8n-trading and publish it (it is committed inactive).
+docker compose -f docker/docker-compose.yml run --rm \
+  -v "$PWD/core/n8n-workflows/trading-marketdata.json:/wf.json:ro" --entrypoint n8n n8n-trading import:workflow --input=/wf.json
+docker compose -f docker/docker-compose.yml run --rm --entrypoint n8n n8n-trading publish:workflow --id=jarvisTradingMd01
+# 2. Load the new allowlist and tool list.
+docker compose -f docker/docker-compose.yml up -d n8n-trading opa-trading mcp-gateway-trading egress-trading
+docker compose -f docker/docker-compose.yml restart opa-trading egress-trading
+```
+
+### Run
+
+`paper-live` must run where `mcp-gateway-trading` resolves, which is `net-trading`. It polls every 60 s (`--poll-s`); `--once` polls a single time, which is the quickest check that data arrives.
+
+```bash
+python -m mod_trading --data-dir /var/lib/jarvis/trading kill-switch release
+python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument SPY
+```
+
+Messages starting with `market data:` mean a poll brought nothing usable; the session keeps polling and trades nothing on that poll. `tests/isolation/test_trading_marketdata_live.py` (`JARVIS_TEST_DOCKER=1`) runs the committed workflow in a real n8n behind the gateway.
+
 ## Exit criterion and what is missing for it
 
-The roadmap asks for several weeks of paper trading without a risk-limit violation before a live key exists. The path is complete and tested (`tests/trading/`). For a continuous paper run it still needs:
+The roadmap asks for several weeks of paper trading without a risk-limit violation before a live key exists. The path is complete and tested (`tests/trading/`), and live bars arrive through n8n-trading. For a continuous paper run it still needs:
 
-- **A market-data feed.** Right now paper sessions replay bars you provide. A live feed would come from `n8n-trading` polling a market-data API through `egress-trading`. That needs a provider and its host on `policies/egress/trading.allow`, which is the owner's choice.
-- **A scheduler and service.** A `trading-paper` container on `net-trading` with no egress, started per session, follows with the feed.
+- **A service.** A `trading-paper` container on `net-trading` (no egress) that runs `paper-live` and restarts with the stack. It changes `docker/`, a protected path.
 - **Deck integration.** The kill switch and daily P&L in the deck's top bar arrive with the orchestrator service that connects domains to the API gateway.
