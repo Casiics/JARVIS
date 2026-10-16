@@ -1,7 +1,7 @@
 [
   {
     "id": "jarvisTradingMd01",
-    "name": "trading: market data (get_bars)",
+    "name": "trading: market data (get_bars, get_daily)",
     "active": false,
     "nodes": [
       {
@@ -12,7 +12,10 @@
         "name": "MCP Server Trigger",
         "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
         "typeVersion": 2,
-        "position": [0, 0],
+        "position": [
+          0,
+          0
+        ],
         "webhookId": "6d1f3a10-0000-4000-8000-0000000000aa"
       },
       {
@@ -23,20 +26,39 @@
           "sendQuery": true,
           "queryParameters": {
             "parameters": [
-              { "name": "interval", "value": "1m" },
-              { "name": "range", "value": "1d" },
-              { "name": "includePrePost", "value": "false" }
+              {
+                "name": "interval",
+                "value": "1m"
+              },
+              {
+                "name": "range",
+                "value": "1d"
+              },
+              {
+                "name": "includePrePost",
+                "value": "false"
+              }
             ]
           },
           "sendHeaders": true,
           "headerParameters": {
             "parameters": [
-              { "name": "User-Agent", "value": "Mozilla/5.0 (X11; Linux x86_64) jarvis-paper" },
-              { "name": "Accept", "value": "application/json" }
+              {
+                "name": "User-Agent",
+                "value": "Mozilla/5.0 (X11; Linux x86_64) jarvis-paper"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
             ]
           },
           "options": {
-            "redirect": { "redirect": { "followRedirects": false } },
+            "redirect": {
+              "redirect": {
+                "followRedirects": false
+              }
+            },
             "timeout": 15000
           }
         },
@@ -44,12 +66,83 @@
         "name": "get_bars",
         "type": "n8n-nodes-base.httpRequestTool",
         "typeVersion": 4.2,
-        "position": [200, 200]
+        "position": [
+          200,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "toolDescription": "Up to ten years of daily OHLCV bars for one ticker symbol, as the provider's raw chart JSON.",
+          "method": "GET",
+          "url": "=https://query1.finance.yahoo.com/v8/finance/chart/{{ encodeURIComponent($fromAI('symbol', 'Ticker symbol, for example SPY', 'string')) }}",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "interval",
+                "value": "1d"
+              },
+              {
+                "name": "range",
+                "value": "10y"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "User-Agent",
+                "value": "Mozilla/5.0 (X11; Linux x86_64) jarvis-paper"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "redirect": {
+              "redirect": {
+                "followRedirects": false
+              }
+            },
+            "timeout": 15000
+          }
+        },
+        "id": "6d1f3a10-0000-4000-8000-000000000003",
+        "name": "get_daily",
+        "type": "n8n-nodes-base.httpRequestTool",
+        "typeVersion": 4.2,
+        "position": [
+          400,
+          200
+        ]
       }
     ],
     "connections": {
       "get_bars": {
-        "ai_tool": [[{ "node": "MCP Server Trigger", "type": "ai_tool", "index": 0 }]]
+        "ai_tool": [
+          [
+            {
+              "node": "MCP Server Trigger",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "get_daily": {
+        "ai_tool": [
+          [
+            {
+              "node": "MCP Server Trigger",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
       }
     },
     "settings": {}

@@ -79,14 +79,13 @@ def _call(stack: Stack, method: str, params: dict[str, object]) -> dict[str, obj
     return stack.probe("probe-agent-trading", "mcp", URL, method, json.dumps(params))
 
 
-def test_the_workflow_offers_exactly_get_bars(stack: Stack) -> None:
+def test_the_workflow_offers_exactly_its_tools(stack: Stack) -> None:
     response = _call(stack, "tools/list", {})
     assert response["status"] == 200
     tools = _result(response)["result"]
     assert isinstance(tools, dict)
-    [tool] = tools["tools"]
-    assert tool["name"] == "get_bars"
-    assert "symbol" in json.dumps(tool["inputSchema"])
+    assert sorted(t["name"] for t in tools["tools"]) == ["get_bars", "get_daily"]
+    assert all("symbol" in json.dumps(t["inputSchema"]) for t in tools["tools"])
 
 
 def test_get_bars_runs_in_n8n(stack: Stack) -> None:
