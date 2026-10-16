@@ -32,6 +32,7 @@ for key, value in json.load(sys.stdin).items():
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o444)
     with os.fdopen(fd, "w") as fh:
         fh.write(str(value))
+    os.chmod(path, 0o444)  # umask 077 would otherwise leave it 0400
 ' "$dest"
   echo "unpacked $domain -> $dest"
 done
