@@ -29,7 +29,7 @@ Caddy terminates TLS on the tailnet and proxies to `127.0.0.1:8080`, including t
 
 **First start:** open the deck, choose "Erster Start: Passkey einrichten" and enter the bootstrap code from `/run/jarvis/secrets/core/deck_bootstrap_code`. The code works only while no passkey exists. Further devices are added from a signed-in session.
 
-**Local trial without a tailnet:** `--rp-id localhost --origin http://localhost:8080`; cookies are then sent without `Secure`.
+**Local trial without a tailnet:** `scripts/deck-local.sh` builds the deck, creates throwaway secrets and starts it on `http://localhost:8080`, printing the setup code. It passes `--rp-id localhost --origin http://localhost:8080`; cookies are then sent without `Secure`, and the audit log stays in memory.
 
 ## Security properties
 

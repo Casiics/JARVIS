@@ -28,7 +28,7 @@ export function Shell({ onSignedOut }: { onSignedOut: () => void }) {
           <span className={`status ${waiting > 0 ? "status-warn" : "status-ok"}`}>
             {waiting > 0 ? `● ${String(waiting)} wartet auf dich` : "● Alles ruhig"}
           </span>
-          <span className="muted">Kill-Switch und Tageskosten folgen mit Phase 4</span>
+          <span className="muted">Kill-Switch und Tageskosten folgen mit dem Trading-Dienst</span>
           <button
             type="button"
             className="ghost"
