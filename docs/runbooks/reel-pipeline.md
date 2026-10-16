@@ -18,9 +18,13 @@ Every sandbox runs read-only, as `nobody`, with all capabilities dropped, `no-ne
 ## One-time setup (workstation)
 
 ```bash
-# 1. Sandbox images (rootless Podman recommended; Docker works with --engine docker)
-podman build -t localhost/jarvis-reel-media:0.1.0   -f modules/mod-content/sandbox/Dockerfile.media   modules/mod-content/sandbox
-podman build -t localhost/jarvis-reel-whisper:0.1.0 -f modules/mod-content/sandbox/Dockerfile.whisper modules/mod-content/sandbox
+# 1. Sandbox images, built with the same engine the worker uses (--engine, default podman).
+#    Podman and Docker keep separate image stores: an image built with podman is invisible
+#    to `--engine docker`, and the step then fails before yt-dlp even starts.
+#    Rebuild the media image after every update of modules/mod-content/sandbox/.
+ENGINE=podman   # or docker (Docker Desktop with WSL integration)
+$ENGINE build -t localhost/jarvis-reel-media:0.1.0   -f modules/mod-content/sandbox/Dockerfile.media   modules/mod-content/sandbox
+$ENGINE build -t localhost/jarvis-reel-whisper:0.1.0 -f modules/mod-content/sandbox/Dockerfile.whisper modules/mod-content/sandbox
 
 # 2. Network and egress proxy for the download step (compose creates jarvis-sandbox-egress)
 docker compose -f docker/docker-compose.yml up -d egress-reel
@@ -53,6 +57,8 @@ On the deck's **Content** page, paste a reel link (Instagram: Share → Copy lin
 uv run python -m mod_content.reel serve
 ```
 
+Before the first reel, the worker checks that the engine runs, both images exist, and the `egress-reel` proxy is up on `jarvis-sandbox-egress`. If anything is missing it stops and names the command that fixes it (`--skip-preflight` turns the check off).
+
 On one host, the gateway and the worker share `/var/lib/jarvis/boundary`. With separate users, give `core-to-content/` to the gateway's user and `content-to-core/` to the worker's, each readable and deletable by the other through a shared group.
 
 ### From the command line
@@ -80,6 +86,23 @@ Downloaded media and audio are deleted after each run unless `--keep-media` is s
 | `awaiting_action` | Injection patterns were found, or a skill candidate needs approval | You, in the approval deck (Phase 3); until then read `runs.jsonl` |
 | `escalated` | A sandbox step failed, media was rejected, a model was unavailable, or the worker failed 4 times | You; `error_class` says which |
 
+### Why a reel failed
+
+yt-dlp's own messages are untrusted text and never leave the sandbox; the host only stores a hash of them. The download step therefore turns them into a fixed exit code, and only that code becomes the `error_class`. The deck shows each class in plain German.
+
+| `error_class` | Cause | Fix |
+|---|---|---|
+| `fetch_sandbox_start_failed` | The container did not start, usually because the image is missing in this engine | Build the images with the worker's engine (setup step 1) |
+| `fetch_proxy_unreachable` | `egress-reel` is down or refused the host | `docker compose -f docker/docker-compose.yml up -d egress-reel`; check `policies/egress/reel.allow` |
+| `fetch_network_error` | DNS failure or timeout on the way to Instagram | Check the host's internet connection and DNS |
+| `fetch_login_required` | Instagram asks for a login or rate-limits anonymous downloads | Wait and resubmit. JARVIS uses no cookies or accounts by design |
+| `fetch_not_available` | Reel deleted, private, or the link is wrong | None |
+| `fetch_too_large`, `fetch_no_video` | Over 200 MB or 10 minutes, or no video in the post | None |
+| `fetch_failed` | Anything else | Run the worker with `--show-sandbox-errors` and read the reason in its terminal; often a too old `YTDLP_VERSION` |
+| `*_timeout` | The step ran into its time limit | Resubmit; check load |
+
+`--show-sandbox-errors` prints the last lines of a failed step's error output to the worker's own terminal. It is never written to `runs.jsonl`, the audit log or the deck.
+
 ## Exit criterion
 
 `report` prints `exit_criterion_met: true` once **20 distinct reels** reached `done` or `awaiting_action` **and** the audit chain verifies. Cost per reel is reported too; with local models it is 0 EUR in API cost.
@@ -90,4 +113,4 @@ Downloaded media and audio are deleted after each run unless `--keep-media` is s
 - **Supervisor QA is rule-based.** The content supervisor is meant to be a cloud model; that needs the cloud client and keys. The `Supervisor` interface is in place.
 - **Task tokens are issued by the CLI itself** with an ephemeral key, because the core task router is not a service yet. Every step is still checked against the token.
 - **Telegram intake** goes through `n8n-content` (Phase 4). Its egress to `api.telegram.org` is allowed, but a workflow that hands URLs to the pipeline does not exist yet; until then reels come from the deck or the CLI.
-- Instagram changes its pages often. When downloads start failing with `fetch_failed`, rebuild the media image with a current `YTDLP_VERSION`.
+- Instagram changes its pages often. When downloads start failing with `fetch_failed` or `fetch_not_available` for reels that are public, rebuild the media image with a current `YTDLP_VERSION`.

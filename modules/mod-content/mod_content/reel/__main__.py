@@ -40,7 +40,7 @@ from mod_content.reel.pipeline import (
     SandboxImages,
     WhisperConfig,
 )
-from mod_content.reel.sandbox import EngineConfig, SubprocessSandboxRunner
+from mod_content.reel.sandbox import EngineConfig, SubprocessSandboxRunner, preflight
 from mod_content.reel.store import FileAuditStore, JsonlReelStore, summarize
 
 DEFAULT_DATA = Path(os.environ.get("JARVIS_CONTENT_DATA", "/var/lib/jarvis/content"))
@@ -97,6 +97,14 @@ def _pipeline_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--media-image", default=SandboxImages.media)
     parser.add_argument("--whisper-image", default=SandboxImages.whisper)
     parser.add_argument("--keep-media", action="store_true")
+    parser.add_argument(
+        "--show-sandbox-errors",
+        action="store_true",
+        help="print the end of a failed step's error output here (never stored or sent on)",
+    )
+    parser.add_argument(
+        "--skip-preflight", action="store_true", help="do not check images and proxy first"
+    )
 
 
 def _ingest(args: argparse.Namespace, data: Path) -> int:
@@ -146,6 +154,17 @@ def _build(
             f"{args.engine} not found: the reel worker runs its sandboxes with it "
             "(docs/runbooks/reel-pipeline.md)"
         )
+    engine = EngineConfig(
+        engine=args.engine,
+        runtime=args.runtime,
+        egress_network=args.egress_network,
+        egress_proxy=args.egress_proxy,
+        show_errors=args.show_sandbox_errors,
+    )
+    if not args.skip_preflight:
+        problems = preflight(engine, (args.media_image, args.whisper_image))
+        if problems:
+            raise SystemExit("not ready to process reels:\n- " + "\n- ".join(problems))
     audit = CountingSink(AuditWriter(FileAuditStore(data / "audit.jsonl")).write)
     gateway = InferenceGateway(
         local=OllamaClient(args.ollama_url),
@@ -153,14 +172,7 @@ def _build(
         audit=audit,
         actor="spiffe://jarvis.home/core/model-router",
     )
-    runner = SubprocessSandboxRunner(
-        EngineConfig(
-            engine=args.engine,
-            runtime=args.runtime,
-            egress_network=args.egress_network,
-            egress_proxy=args.egress_proxy,
-        )
-    )
+    runner = SubprocessSandboxRunner(engine)
     key = secrets.token_bytes(32)
     outbox_file = data / "outbox.jsonl"
 

@@ -37,6 +37,8 @@ cat <<EOF
                   reel worker in a second terminal (needs the setup in
                   docs/runbooks/reel-pipeline.md):
                   uv run python -m mod_content.reel serve --boundary-dir $STATE/boundary
+                  The worker checks images and proxy first and says what is missing.
+                  Add --show-sandbox-errors to see why a download failed.
 
 EOF
 

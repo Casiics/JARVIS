@@ -81,6 +81,7 @@ main { padding: 24px; }
 .reel-awaiting_action { border-color: var(--warning); }
 .reel-running { border-color: var(--accent); }
 .reel-age { margin-left: auto; }
+.reel-error { flex-basis: 100%; margin: 0; font-size: 14px; }
 .lane a { color: var(--text); }
 .intake { display: grid; gap: 8px; }
 .intake-row { display: flex; gap: 12px; flex-wrap: wrap; }
