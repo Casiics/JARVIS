@@ -28,6 +28,7 @@ from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditLogEntry
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.task_token import load_signing_key, public_key_hex
+from jarvis_core.orchestrator.anchors import AnchorBook
 from jarvis_core.orchestrator.service import Orchestrator, TaskTokenIssuer, run_forever
 from jarvis_core.secrets.provider import SecretAccessError, UnpackedSopsProvider
 
@@ -79,6 +80,7 @@ def main(argv: list[str] | None = None) -> None:
         audit=audit,
         telemetry=telemetry.publish,
         tokens=_task_tokens(secrets),
+        anchors=AnchorBook(args.data_dir / "audit-anchors.json"),
     )
     deps = GatewayDeps(
         credentials=FileCredentialStore(args.data_dir / "credentials.json"),

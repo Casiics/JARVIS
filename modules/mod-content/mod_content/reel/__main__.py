@@ -28,6 +28,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from jarvis_core.audit.chain import AuditChainError, AuditWriter, verify_chain
+from jarvis_core.boundary.anchor import anchor_event
 from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import BoundaryEvent, ReelSubmitted, Taint, TaskMetadata
@@ -261,10 +262,21 @@ def _serve(args: argparse.Namespace, data: Path) -> int:
             event = letter.event
             if isinstance(event, ReelSubmitted):
                 _handle(mailbox, pipeline, store, verifier, event)
+                _anchor(mailbox, data)
             mailbox.ack(letter)
         if args.once:
             return 0
         time.sleep(args.poll_seconds)
+
+
+def _anchor(mailbox: Mailbox, data: Path) -> None:
+    """Anchor the local audit chain's head in core's log after each reel.
+
+    Opening the file re-verifies the whole chain; a broken chain stops the worker.
+    """
+    audit_file = data / "audit.jsonl"
+    if audit_file.exists():
+        mailbox.send(anchor_event(Domain.CONTENT, "reel", FileAuditStore(audit_file).entries()))
 
 
 def _handle(

@@ -32,10 +32,17 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import DataClassification, Domain
-from jarvis_core.contracts.events import BoundaryEvent, ReelSubmitted, Taint, TaskMetadata
+from jarvis_core.contracts.events import (
+    AuditAnchor,
+    BoundaryEvent,
+    ReelSubmitted,
+    Taint,
+    TaskMetadata,
+)
 from jarvis_core.contracts.reel_url import canonical_reel_url
 from jarvis_core.contracts.task_token import issue_signed_token
 from jarvis_core.contracts.telemetry import TelemetryEvent, TelemetryState
+from jarvis_core.orchestrator.anchors import AnchorBook, AnchorVerdict
 from jarvis_core.orchestrator.state_machine import TaskState
 from jarvis_core.storage import write_atomic
 
@@ -199,6 +206,7 @@ class Orchestrator:
         deadline: timedelta = DEFAULT_DEADLINE,
         routes: dict[str, Dispatcher] | None = None,
         tokens: TaskTokenIssuer | None = None,
+        anchors: AnchorBook | None = None,
     ) -> None:
         if mailbox.me is not Domain.CORE:
             raise ValueError("the orchestrator runs in core")
@@ -212,6 +220,7 @@ class Orchestrator:
         # Without an issuer, events go out unsigned and a worker that checks tokens refuses
         # them. Only tests and the deck without a reel worker run like that.
         self._tokens = tokens
+        self._anchors = AnchorBook(None) if anchors is None else anchors
         self._lock = threading.RLock()
         self._tasks: dict[UUID, TaskRecord] = {}
         if path is not None and path.exists():
@@ -295,6 +304,8 @@ class Orchestrator:
                         updated = self._apply(origin, event)
                         if updated is not None:
                             changed.append(updated)
+                    elif isinstance(event, AuditAnchor):
+                        self._anchor(origin, event)
                     self._mailbox.ack(letter)
             if changed:
                 self._save()
@@ -374,6 +385,26 @@ class Orchestrator:
         self._audit_entry(moved, f"{origin.value}:report:{state.value}", decision)
         self._emit(moved, f"{origin.value}:{moved.kind}")
         return moved
+
+    def _anchor(self, origin: Domain, event: AuditAnchor) -> None:
+        """Write a domain's chain head into core's log; a chain going backwards is a denial."""
+        verdict = self._anchors.record(origin, event)
+        if verdict is AnchorVerdict.UNCHANGED:
+            return
+        rolled_back = verdict is AnchorVerdict.ROLLED_BACK
+        self._audit(
+            AuditLogEntry(
+                trace_id=event.event_id.hex,
+                domain=Domain.CORE,
+                actor=ACTOR,
+                action=AuditAction.BOUNDARY_EVENT,
+                target=f"audit_anchor:{origin.value}/{event.chain}",
+                decision=AuditDecision.DENY if rolled_back else AuditDecision.ALLOW,
+                policy_id="audit-anchor-rollback" if rolled_back else None,
+                content_hash=event.head_hash,
+                content_ref=f"entries={event.entries}",
+            )
+        )
 
     def _audit_entry(
         self,
