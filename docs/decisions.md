@@ -1,27 +1,29 @@
 # Architecture Decisions
 
-Accepted by the project owner on 2026-10-16. Context and rationale: [`architecture.md`](architecture.md).
+Accepted by the project owner on 2026-10-16 and aligned with the Zero-Trust security concept the same day. Where the two documents differed, the stricter option was taken. Context: [`architecture.md`](architecture.md).
 
-| # | Question | Decision | Rationale |
+| # | Question | Decision | Revisit when |
 |---|---|---|---|
-| 1 | System name | **JARVIS** (replaces "Nexus-OS" everywhere) | Matches the repository name |
-| 2 | One Hermes instance or one per cell | **One per cell**, each with its own data directory | Memory and learned skills must not leak across domains |
-| 3 | Local inference | **One shared Ollama**, stateless, no egress, reachable only via the router; a dedicated Life-OS instance once a second GPU exists | Single GPU today; routing through the router keeps classification, budget and audit enforced |
-| 4 | n8n instances | **Two**: `n8n-life` and `n8n-public`; broker orders go through the trading executor, not n8n | Keeps private credentials out of the public instance; order execution belongs in deterministic code |
-| 5 | Policy language | **Open Policy Agent (Rego)** | Widely used, testable, policies as code |
-| 6 | Event bus | **Redis Streams** to start; move to NATS once a second host joins | Redis is already in the stack |
-| 7 | Trading supervisor model | **Cloud Tier 1 with pseudonymised data** for strategy reviews; **local** for anything tied to an account | Strong reviews without exposing account data |
-| 8 | Broker | **Open**. Requirements: paper trading account, trade-only keys without withdrawal rights, IP binding | Not yet chosen |
+| 1 | System name | **JARVIS** (replaces "Nexus-OS" everywhere) | – |
+| 2 | Domains | **core, trading, content, private**; reel ingestion belongs to content, self-improvement to core | A new domain is needed |
+| 3 | Hermes instances | **One per domain**, each with its own supervisor and data directory; core runs a thin task router that issues signed task tokens and has no data access | – |
+| 4 | Local inference | **One Ollama** on the RTX 4070 Ti (12 GB), in `net-inference`, reachable only via the model router, one model loaded at a time. Q4 models: `qwen2.5-coder:14b` (to ~8k context, else `:7b`), `deepseek-r1:8b`, `qwen2.5vl:7b`; `bge-m3` on the CPU | A second or larger GPU arrives |
+| 5 | n8n instances | **One per domain** (`n8n-trading`, `n8n-content`, `n8n-private`), each with its own encryption key; agents cannot use the n8n REST API | – |
+| 6 | Secrets | **SOPS + age, one key per domain**, behind `SecretProvider` | Dynamic DB credentials, a second server or a second person are needed: then HashiCorp Vault |
+| 7 | Policy | **Python boundary rules now**, OPA (Rego) behind Envoy as policy gateway in Phase 4 | – |
+| 8 | Event bus | **Redis Streams** | A second host joins: then NATS |
+| 9 | Trading supervisor | **Cloud with pseudonymised data** for strategy reviews, **local** for anything account-related | – |
+| 10 | Broker | **Broker-independent `BrokerAdapter`** (`get_quote`, `get_positions`, `place_order`, `cancel_order`). Must-haves: no withdrawal via API, IP allowlist, paper/testnet with the same API, EU regulation. Candidates to verify: Interactive Brokers (stocks, ETFs), an EU-licensed crypto exchange such as Kraken via CCXT | Before the first live key |
 
 ## Corrections to the original context files
 
 The original context (`JARVIS_context/`) is superseded where it conflicts with these decisions:
 
-- Shared Qdrant collection, shared semantic cache and a single Postgres role are replaced by per-cell stores and roles.
-- Database credentials and the GitHub token no longer appear in MCP server configuration; agents reach data through cell memory services and git through the git gateway.
-- Browser automation runs only inside the sandbox runner.
-- Telemetry carries metadata only.
-- The audit log stores hashes and references, not content (GDPR erasure via crypto-shredding).
-- Self-improvement agents may not edit protected paths (see `architecture.md` section 7.5).
-- Container images are pinned by digest instead of `latest`.
-- Model names in the router configuration are to be updated to current models when the router is implemented.
+- Shared Postgres, Qdrant, Redis and semantic cache are replaced by per-domain instances and namespaces.
+- The default database password and credentials in MCP configuration are removed; agents read curated views through domain MCP servers.
+- The GitHub personal access token is replaced by a GitHub App behind the git gateway.
+- Browser automation runs only in sandboxes; its output is tainted.
+- Telemetry carries metadata only; the audit log stores hashes and references, not content.
+- Self-improvement agents may not edit protected paths.
+- Images and MCP servers are pinned instead of `latest` / unpinned `npx -y`.
+- Model sizes follow decision 4 (the original `qwen2.5-coder:32b` does not fit 12 GB).

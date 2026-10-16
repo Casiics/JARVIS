@@ -1,0 +1,202 @@
+# JARVIS data plane, Phase 1 (docs/architecture.md, sections 7 and 8).
+#
+# - One Postgres instance per domain plus a separate audit instance.
+# - Every network is internal: containers have no route to the internet.
+# - No host ports. Debug access goes through docker-compose.debug.yml.
+# - Secrets are files decrypted from SOPS by scripts/secrets-unpack.sh into
+#   ${JARVIS_SECRETS_DIR}/<domain>/<key> (tmpfs). Each service mounts only its own domain's files.
+# - Images are pinned; Renovate proposes updates.
+
+name: jarvis
+
+x-postgres: &postgres
+  image: postgres:17.6-alpine
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  environment: &postgres-env
+    POSTGRES_USER: postgres
+    POSTGRES_DB: jarvis
+    POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres -d jarvis"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+
+services:
+  # --- core -----------------------------------------------------------------------------------
+  pg-audit:
+    <<: *postgres
+    networks: [net-core]
+    volumes:
+      - pg_audit_data:/var/lib/postgresql/data
+      - ./postgres/audit:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - { source: core_pg_audit_superuser_password, target: pg_superuser_password }
+      - { source: core_pg_audit_writer_password, target: pg_audit_writer_password }
+      - { source: core_pg_audit_reader_password, target: pg_audit_reader_password }
+
+  pg-core:
+    <<: *postgres
+    networks: [net-core]
+    volumes:
+      - pg_core_data:/var/lib/postgresql/data
+      - ./postgres/domain:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - { source: core_pg_superuser_password, target: pg_superuser_password }
+      - { source: core_pg_app_password, target: pg_app_password }
+      - { source: core_pg_agent_ro_password, target: pg_agent_ro_password }
+
+  redis-core:
+    image: redis:7.4.5-alpine
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-core]
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"
+    volumes:
+      - redis_core_data:/data
+    secrets:
+      - { source: core_redis_password, target: redis_password }
+
+  # --- trading --------------------------------------------------------------------------------
+  pg-trading:
+    <<: *postgres
+    networks: [net-trading]
+    volumes:
+      - pg_trading_data:/var/lib/postgresql/data
+      - ./postgres/domain:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - { source: trading_pg_superuser_password, target: pg_superuser_password }
+      - { source: trading_pg_app_password, target: pg_app_password }
+      - { source: trading_pg_agent_ro_password, target: pg_agent_ro_password }
+
+  # --- content --------------------------------------------------------------------------------
+  pg-content:
+    <<: *postgres
+    networks: [net-content]
+    volumes:
+      - pg_content_data:/var/lib/postgresql/data
+      - ./postgres/domain:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - { source: content_pg_superuser_password, target: pg_superuser_password }
+      - { source: content_pg_app_password, target: pg_app_password }
+      - { source: content_pg_agent_ro_password, target: pg_agent_ro_password }
+
+  qdrant-content:
+    image: qdrant/qdrant:v1.15.1
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-content]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - export QDRANT__SERVICE__API_KEY="$$(cat /run/secrets/qdrant_api_key)" && exec ./entrypoint.sh
+    volumes:
+      - qdrant_content_data:/qdrant/storage
+    secrets:
+      - { source: content_qdrant_api_key, target: qdrant_api_key }
+
+  # --- private (Life-OS) ----------------------------------------------------------------------
+  pg-private:
+    <<: *postgres
+    networks: [net-private]
+    volumes:
+      - pg_private_data:/var/lib/postgresql/data
+      - ./postgres/domain:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - { source: private_pg_superuser_password, target: pg_superuser_password }
+      - { source: private_pg_app_password, target: pg_app_password }
+      - { source: private_pg_agent_ro_password, target: pg_agent_ro_password }
+
+  qdrant-private:
+    image: qdrant/qdrant:v1.15.1
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-private]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - export QDRANT__SERVICE__API_KEY="$$(cat /run/secrets/qdrant_api_key)" && exec ./entrypoint.sh
+    volumes:
+      - qdrant_private_data:/qdrant/storage
+    secrets:
+      - { source: private_qdrant_api_key, target: qdrant_api_key }
+
+  redis-private:
+    image: redis:7.4.5-alpine
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-private]
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"
+    volumes:
+      - redis_private_data:/data
+    secrets:
+      - { source: private_redis_password, target: redis_password }
+
+  # --- inference ------------------------------------------------------------------------------
+  # One GPU (RTX 4070 Ti, 12 GB): one Ollama instance, one model loaded at a time.
+  # Reachable only by the model router (joins net-inference in a later phase), never by agents.
+  ollama:
+    image: ollama/ollama:0.11.4
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-inference]
+    environment:
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_KEEP_ALIVE: "5m"
+    volumes:
+      - ollama_models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+networks:
+  net-core: { internal: true }
+  net-trading: { internal: true }
+  net-content: { internal: true }
+  net-private: { internal: true }
+  net-inference: { internal: true }
+
+volumes:
+  pg_audit_data:
+  pg_core_data:
+  pg_trading_data:
+  pg_content_data:
+  pg_private_data:
+  redis_core_data:
+  redis_private_data:
+  qdrant_content_data:
+  qdrant_private_data:
+  ollama_models:
+
+secrets:
+  core_pg_audit_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_audit_superuser_password" }
+  core_pg_audit_writer_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_audit_writer_password" }
+  core_pg_audit_reader_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_audit_reader_password" }
+  core_pg_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_superuser_password" }
+  core_pg_app_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_app_password" }
+  core_pg_agent_ro_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_agent_ro_password" }
+  core_redis_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/redis_password" }
+  trading_pg_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/trading/pg_superuser_password" }
+  trading_pg_app_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/trading/pg_app_password" }
+  trading_pg_agent_ro_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/trading/pg_agent_ro_password" }
+  content_pg_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/pg_superuser_password" }
+  content_pg_app_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/pg_app_password" }
+  content_pg_agent_ro_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/pg_agent_ro_password" }
+  content_qdrant_api_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/qdrant_api_key" }
+  private_pg_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/pg_superuser_password" }
+  private_pg_app_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/pg_app_password" }
+  private_pg_agent_ro_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/pg_agent_ro_password" }
+  private_qdrant_api_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/qdrant_api_key" }
+  private_redis_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/redis_password" }

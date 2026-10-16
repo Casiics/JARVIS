@@ -1,0 +1,50 @@
+[project]
+name = "jarvis"
+version = "0.1.0"
+description = "JARVIS multi-agent platform: core contracts, policy, audit and routing"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.8,<3",
+    "pyyaml>=6.0,<7",
+]
+
+[project.optional-dependencies]
+db = ["psycopg[binary]>=3.2,<4"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "mypy>=1.13",
+    "ruff>=0.8",
+    "types-PyYAML>=6.0",
+    "psycopg[binary]>=3.2,<4",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["core/jarvis_core"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jarvis_core"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+mypy_path = "core"
+packages = ["jarvis_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["db: needs a PostgreSQL server (JARVIS_TEST_PG_DSN or local initdb)"]

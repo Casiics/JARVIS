@@ -1,0 +1,10 @@
+# One-off override to download models: gives Ollama temporary internet access.
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.models.yml up -d ollama
+#   docker exec jarvis-ollama-1 ollama pull qwen2.5-coder:14b-instruct-q4_K_M
+#   ... then restart without this file so Ollama is offline again.
+services:
+  ollama:
+    networks: [net-inference, net-model-pull]
+
+networks:
+  net-model-pull: {}
