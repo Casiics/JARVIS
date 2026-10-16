@@ -11,7 +11,7 @@ import pytest
 
 from jarvis_core.curation.config import load_config
 from jarvis_core.orchestrator.state_machine import TaskState
-from mod_content.curation.__main__ import DEFAULT_CATEGORIES, _inputs_signature, main
+from mod_content.curation.__main__ import DEFAULT_CATEGORIES, inputs_signature, main
 from mod_content.curation.notes import note_items, parse_note
 from mod_content.curation.sources import reel_item
 from mod_content.reel.schemas import ReelKnowledgeArtifact, TargetModule
@@ -176,7 +176,7 @@ def test_notes_search_and_export_through_the_cli(
 def test_watch_signature_changes_only_with_inputs(tmp_path: Path) -> None:
     runs = tmp_path / "runs.jsonl"
     inbox = tmp_path / "inbox"
-    first = _inputs_signature(runs, inbox)
-    assert _inputs_signature(runs, inbox) == first
+    first = inputs_signature(runs, inbox)
+    assert inputs_signature(runs, inbox) == first
     runs.write_text("\n", encoding="utf-8")
-    assert _inputs_signature(runs, inbox) != first
+    assert inputs_signature(runs, inbox) != first

@@ -112,3 +112,21 @@ media are the noisiest material.
 
 Curation keeps its own audit chain because `reel serve` holds the head of `audit.jsonl` in
 memory; two writers on one file would break the chain.
+
+## Trading domain
+
+The same four stages run in the trading domain on its own data, over the ideas content proposes
+into the trading inbox (`ideas.json`):
+
+```bash
+uv run python -m mod_trading.curation --data-dir ~/jarvis-data/trading run
+uv run python -m mod_trading.curation --data-dir ~/jarvis-data/trading review
+uv run python -m mod_trading.curation --data-dir ~/jarvis-data/trading export --category index-etf
+```
+
+Categories: `modules/mod-trading/mod_trading/curation/categories.yaml` (`index-etf` for QQQ, SPY
+and IWM, `earnings`, `risk`, `general`). Ideas naming a watchlist instrument (QQQ, SPY, IWM) get
+a higher signal. The inbox carries no label, so items fail closed to PRIVATE; trading reviews
+stay in the terminal and never reach the deck. Thresholds are high on purpose: nothing from
+social media enters trading context without the owner. Curated notes are research context for
+trading's agents, never signals or orders.

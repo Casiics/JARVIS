@@ -1,0 +1,30 @@
+# Context categories of the trading domain. Material is research context for trading's own
+# agents; it never becomes a signal or an order. Everything here is PRIVATE (the inbox carries
+# no label), stays in the trading domain and is decided in the terminal, never in the deck.
+# Thresholds are high on purpose: social-media trading claims need a human in the loop.
+domain: trading
+default_category: general
+categories:
+  - name: index-etf
+    description: QQQ, SPY, IWM and index strategies
+    tags: [qqq, spy, iwm]
+    keywords: [qqq, spy, iwm, nasdaq, russell, index, etf, "0dte", breakout, opening, range]
+    min_signal: 0.5
+    auto_store_at: 0.9
+    max_classification: private
+  - name: earnings
+    description: Earnings plays, guidance, post-earnings drift
+    keywords: [earnings, guidance, eps, revenue, drift, iv, crush]
+    min_signal: 0.5
+    auto_store_at: 0.9
+    max_classification: private
+  - name: risk
+    description: Position sizing, stops, drawdown rules
+    keywords: [risk, stop, sizing, drawdown, loss, hedge, spread]
+    auto_store_at: 0.85
+    max_classification: private
+  - name: general
+    description: Everything else
+    min_signal: 0.5
+    auto_store_at: 0.95
+    max_classification: private
