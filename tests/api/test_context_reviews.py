@@ -63,6 +63,7 @@ def test_review_round_trip_through_the_deck(deck: Deck, tmp_path: Path) -> None:
     assert bridge.sync().sent == 1
     assert bridge.sync().sent == 0  # each review is sent once
 
+    assert deck.client.get("/api/attention").json()["context_reviews"] == 1
     listing = deck.client.get("/api/content/context-reviews").json()
     [review] = listing["open"]
     assert review["category"] == "market-notes"
@@ -83,6 +84,7 @@ def test_review_round_trip_through_the_deck(deck: Deck, tmp_path: Path) -> None:
 
     assert bridge.sync().applied == 1
     assert open_reviews(store.decisions()) == []
+    assert deck.client.get("/api/attention").json()["context_reviews"] == 0
     [stored] = store.entries("market-notes")
     assert stored.title.startswith("A QQQ opening range")
     listing = deck.client.get("/api/content/context-reviews").json()

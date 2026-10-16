@@ -340,7 +340,11 @@ def create_app(settings: GatewaySettings, deps: GatewayDeps) -> FastAPI:
         session_of(request)
         now = deps.clock()
         items = [_summary(a, now) for a in deps.approvals.pending()]
-        return {"approvals": items, "count": len(items)}
+        reviews = 0
+        if deps.context_reviews is not None:
+            deps.context_reviews.sync()
+            reviews = len(deps.context_reviews.open())
+        return {"approvals": items, "count": len(items), "context_reviews": reviews}
 
     @app.get("/api/approvals/{approval_id}")
     def approval_detail(approval_id: UUID, request: Request) -> dict[str, Any]:
