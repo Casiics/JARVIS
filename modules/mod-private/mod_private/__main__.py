@@ -32,7 +32,7 @@ from jarvis_core.audit.file import FileAuditStore
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.events import Taint
 from jarvis_core.contracts.task_token import TaskTokenClaims, issue_token, verify_token
-from jarvis_core.router.budget import CircuitBreaker, InMemorySpendLedger
+from jarvis_core.router.budget import CircuitBreaker, FileSpendLedger
 from jarvis_core.router.client import OllamaClient
 from jarvis_core.router.gateway import InferenceGateway
 from jarvis_core.secrets.provider import SecretAccessError, UnpackedSopsProvider
@@ -59,7 +59,7 @@ def build(args: argparse.Namespace) -> PrivateAssistant:
     audit = AuditWriter(FileAuditStore(data / "audit.jsonl")).write
     gateway = InferenceGateway(
         local=OllamaClient(os.environ.get("JARVIS_OLLAMA_URL", "http://ollama:11434")),
-        breaker=CircuitBreaker(InMemorySpendLedger()),
+        breaker=CircuitBreaker(FileSpendLedger(data / "spend.jsonl")),
         audit=audit,
         actor="spiffe://jarvis.home/private/model-router",
     )
