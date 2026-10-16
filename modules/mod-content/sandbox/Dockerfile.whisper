@@ -1,0 +1,17 @@
+# Sandbox image for Faster-Whisper transcription. GPU, no network; models are mounted
+# read-only at /models (downloaded once, see docs/runbooks/reel-pipeline.md).
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ARG FASTER_WHISPER_VERSION=1.2.1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip3 install --no-cache-dir "faster-whisper==${FASTER_WHISPER_VERSION}"
+
+ENV HF_HUB_OFFLINE=1
+COPY reel_transcribe.py /opt/jarvis/reel_transcribe.py
+RUN printf '#!/bin/sh\nexec python3 /opt/jarvis/reel_transcribe.py "$@"\n' > /usr/local/bin/reel-transcribe \
+ && chmod 0555 /usr/local/bin/reel-transcribe /opt/jarvis/reel_transcribe.py
+
+USER 65534:65534
+WORKDIR /tmp

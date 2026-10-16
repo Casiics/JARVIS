@@ -4,7 +4,8 @@ PLANNED -> RUNNING -> GATE_CHECK --fail--> RUNNING (error trace, no supervisor c
                                  --pass--> SUPERVISOR_QA --reject--> RUNNING (feedback)
                                                          --accept--> DONE | AWAITING_ACTION
 AWAITING_ACTION --approved--> EXECUTING -> DONE ; --rejected--> ESCALATED
-Any retry beyond MAX_ITERATIONS, or an exhausted budget -> ESCALATED.
+Any retry beyond MAX_ITERATIONS, an exhausted budget, or a failed deterministic step
+(sandbox, media check) -> ESCALATED.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ class Event(StrEnum):
     ACTION_REJECTED = "action_rejected"
     EXECUTED = "executed"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    STEP_FAILED = "step_failed"
 
 
 _TRANSITIONS: dict[tuple[TaskState, Event], TaskState] = {
@@ -91,7 +93,7 @@ class TaskMachine:
         if task.state in _TERMINAL:
             raise InvalidTransition(f"task is {task.state}; no further events")
 
-        if event is Event.BUDGET_EXHAUSTED:
+        if event in (Event.BUDGET_EXHAUSTED, Event.STEP_FAILED):
             return self._move(task, TaskState.ESCALATED, event, AuditDecision.ESCALATE)
 
         target = _TRANSITIONS.get((task.state, event))

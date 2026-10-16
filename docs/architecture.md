@@ -272,10 +272,10 @@ The dashboard observes and approves; it is not a privileged control channel. It 
 
 Each phase ends with an exit criterion that must hold before the next starts.
 
-1. **Foundation** (in progress): Python workspace and CI; contracts (domains, classes, events, audit entries, action requests, task tokens); boundary policy; action gate; model router policy with PII scanner, cache namespaces and circuit breaker; orchestrator state machine; audit chain with append-only Postgres schema; SOPS secrets with one age key per domain; Compose with one database instance and one internal network per domain.
+1. **Foundation** (done, PR #2): Python workspace and CI; contracts (domains, classes, events, audit entries, action requests, task tokens); boundary policy; action gate; model router policy with PII scanner, cache namespaces and circuit breaker; orchestrator state machine; audit chain with append-only Postgres schema; SOPS secrets with one age key per domain; Compose with one database instance and one internal network per domain.
    Exit: tests prove that no private-domain or `PRIVATE` request reaches a cloud endpoint, that each data service sits only in its own domain network with only its own secrets, and that the audit log is append-only.
-2. **First vertical slice: reel pipeline** in the content domain with quarantine worker, sandbox and local models.
-   Exit: 20 real reels processed, cost and audit visible.
+2. **First vertical slice: reel pipeline** in the content domain with quarantine worker, sandbox and local models (implemented in `modules/mod-content/`; runbook: [`runbooks/reel-pipeline.md`](runbooks/reel-pipeline.md)). Model calls go through the inference gateway (`core/jarvis_core/router/gateway.py`), which combines routing policy, circuit breaker and audit.
+   Exit: 20 real reels processed, cost and audit visible (`python -m mod_content.reel report`). Open: needs a run on the workstation GPU.
 3. **Dashboard skeleton** and API gateway with passkey login.
    Exit: a tier C action can only be approved via the deck.
 4. **Isolation services**: one n8n instance per domain, policy gateway (OPA behind Envoy) in front of all MCP servers, egress proxy with per-domain allowlists, git gateway.

@@ -1,6 +1,21 @@
-# Local debugging only: exposes the core databases on 127.0.0.1. Never use on the homelab server.
+# Local debugging only: exposes services on 127.0.0.1. Never use on the homelab server.
+#
+# Docker does not publish ports of containers that sit only on internal networks, so the
+# exposed services also join net-debug-loopback: a bridge without IP masquerading, which
+# lets the host reach the published port but gives the containers no route to the internet.
 services:
   pg-core:
+    networks: [net-core, net-debug-loopback]
     ports: ["127.0.0.1:5432:5432"]
   pg-audit:
+    networks: [net-core, net-debug-loopback]
     ports: ["127.0.0.1:5433:5432"]
+  # The Phase 2 reel pipeline runs on the host and reaches Ollama on loopback only.
+  ollama:
+    networks: [net-inference, net-debug-loopback]
+    ports: ["127.0.0.1:11434:11434"]
+
+networks:
+  net-debug-loopback:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
