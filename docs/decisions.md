@@ -10,7 +10,7 @@ Accepted by the project owner on 2026-10-16 and aligned with the Zero-Trust secu
 | 4 | Local inference | **One Ollama** on the RTX 4070 Ti (12 GB), in `net-inference`, reachable only via the model router, one model loaded at a time. Q4 models: `qwen2.5-coder:14b` (to ~8k context, else `:7b`), `deepseek-r1:8b`, `qwen2.5vl:7b`; `bge-m3` on the CPU | A second or larger GPU arrives |
 | 5 | n8n instances | **One per domain** (`n8n-trading`, `n8n-content`, `n8n-private`), each with its own encryption key; agents cannot use the n8n REST API | – |
 | 6 | Secrets | **SOPS + age, one key per domain**, behind `SecretProvider` | Dynamic DB credentials, a second server or a second person are needed: then HashiCorp Vault |
-| 7 | Policy | **Python boundary rules now**, OPA (Rego) behind Envoy as policy gateway in Phase 4 | – |
+| 7 | Policy | **Python boundary rules now**, OPA (Rego) behind Envoy as policy gateway in front of MCP servers (Phase 4, `policies/mcp/`) | – |
 | 8 | Event bus | **Redis Streams** | A second host joins: then NATS |
 | 9 | Trading supervisor | **Cloud with pseudonymised data** for strategy reviews, **local** for anything account-related | – |
 | 10 | Broker | **Broker-independent `BrokerAdapter`** (`get_quote`, `get_positions`, `place_order`, `cancel_order`). Must-haves: no withdrawal via API, IP allowlist, paper/testnet with the same API, EU regulation. Candidates to verify: Interactive Brokers (stocks, ETFs), an EU-licensed crypto exchange such as Kraken via CCXT | Before the first live key |

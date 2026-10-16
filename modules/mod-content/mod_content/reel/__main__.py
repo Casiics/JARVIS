@@ -57,8 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     ingest.add_argument("--egress-network", default="jarvis-sandbox-egress")
     ingest.add_argument(
         "--egress-proxy",
-        default=None,
-        help="egress proxy enforcing the host allowlist (Phase 4); without it egress is open",
+        default="http://egress-reel:3128",
+        help="egress proxy enforcing policies/egress/reel.allow (compose service egress-reel)",
     )
     ingest.add_argument(
         "--whisper-models", type=Path, default=Path("/var/lib/jarvis/models/whisper")

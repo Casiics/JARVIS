@@ -119,7 +119,7 @@ class EngineConfig:
     engine: Literal["podman", "docker"] = "podman"
     runtime: str | None = None  # e.g. "runsc" for gVisor
     egress_network: str = "jarvis-sandbox-egress"
-    egress_proxy: str | None = "http://egress-proxy:3128"
+    egress_proxy: str | None = "http://egress-reel:3128"
     user: str = "65534:65534"
 
 

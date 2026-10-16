@@ -1,0 +1,9 @@
+# OPA for one domain's policy gateway. Loaded with policies/mcp/*.rego and that domain's
+# policies/mcp-tools/<domain>.json; the REST API listens on loopback only.
+plugins:
+  envoy_ext_authz_grpc:
+    addr: 0.0.0.0:9191
+    path: mcp/authz/result
+    enable-reflection: false
+decision_logs:
+  console: true

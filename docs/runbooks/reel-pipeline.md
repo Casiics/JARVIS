@@ -6,7 +6,7 @@ Turns Instagram reel URLs into validated `ReelKnowledgeArtifact`s in the content
 
 | Step | Where | Network | Notes |
 |---|---|---|---|
-| fetch | `jarvis-reel-media` sandbox (yt-dlp) | `jarvis-sandbox-egress` only | max 200 MB, max 10 min, no playlists, no cookies or accounts |
+| fetch | `jarvis-reel-media` sandbox (yt-dlp) | `jarvis-sandbox-egress` only, through `egress-reel` and [`policies/egress/reel.allow`](../../policies/egress/reel.allow) | max 200 MB, max 10 min, no playlists, no cookies or accounts |
 | extract | `jarvis-reel-media` sandbox (ffmpeg) | none | 16 kHz mono WAV, up to 12 scene-change keyframes, metadata.json |
 | transcribe | `jarvis-reel-whisper` sandbox (Faster-Whisper) | none | GPU; Ollama models are unloaded first (one GPU, one model) |
 | keyframe reading | Ollama `qwen2.5vl:7b` via the inference gateway | – | local only (`require_local`) |
@@ -22,8 +22,9 @@ Every sandbox runs read-only, as `nobody`, with all capabilities dropped, `no-ne
 podman build -t localhost/jarvis-reel-media:0.1.0   -f modules/mod-content/sandbox/Dockerfile.media   modules/mod-content/sandbox
 podman build -t localhost/jarvis-reel-whisper:0.1.0 -f modules/mod-content/sandbox/Dockerfile.whisper modules/mod-content/sandbox
 
-# 2. Network for the download step
-podman network create jarvis-sandbox-egress
+# 2. Network and egress proxy for the download step (compose creates jarvis-sandbox-egress)
+docker compose -f docker/docker-compose.yml up -d egress-reel
+# Run the CLI with --engine docker so the sandbox joins that network.
 
 # 3. Whisper model, downloaded once and mounted read-only afterwards
 sudo mkdir -p /var/lib/jarvis/models/whisper /var/lib/jarvis/content
@@ -70,8 +71,8 @@ Downloaded media and audio are deleted after each run unless `--keep-media` is s
 
 ## Known limits of Phase 2
 
-- **Egress allowlist is not enforced yet.** The fetch sandbox gets the allowlist (`JARVIS_EGRESS_ALLOWLIST`), but the per-domain egress proxy that enforces it arrives in Phase 4. Until then pass `--egress-proxy` if you run one; otherwise the fetch step has open egress. It still has no secrets, no host paths except its own output directory, and a read-only root.
+- **Egress** is enforced since Phase 4: `jarvis-sandbox-egress` is internal, and its only way out is `egress-reel`, which allows HTTPS to the Instagram hosts in `policies/egress/reel.allow` and nothing else.
 - **Supervisor QA is rule-based.** The content supervisor is meant to be a cloud model; that needs the cloud client and keys. The `Supervisor` interface is in place.
 - **Task tokens are issued by the CLI itself** with an ephemeral key, because the core task router is not a service yet. Every step is still checked against the token.
-- **Telegram intake** goes through `n8n-content`, which arrives in Phase 4. Until then URLs are passed to the CLI.
+- **Telegram intake** goes through `n8n-content` (Phase 4). Its egress to `api.telegram.org` is allowed, but a workflow that hands URLs to the pipeline does not exist yet; until then URLs are passed to the CLI.
 - Instagram changes its pages often. When downloads start failing with `fetch_failed`, rebuild the media image with a current `YTDLP_VERSION`.

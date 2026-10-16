@@ -12,6 +12,8 @@ dependencies = [
 db = ["psycopg[binary]>=3.2,<4"]
 # API gateway for the command deck (core, net-gateway). Domain workers do not need it.
 gateway = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "websockets>=15,<17", "webauthn>=3.0,<4"]
+# Git gateway (core): signs GitHub App JWTs.
+gitgateway = ["cryptography>=45,<51"]
 
 [dependency-groups]
 dev = [
@@ -25,6 +27,7 @@ dev = [
     "uvicorn>=0.32,<1",
     "websockets>=15,<17",
     "webauthn>=3.0,<4",
+    "cryptography>=45,<51",
 ]
 
 [build-system]
@@ -55,4 +58,7 @@ exclude = ["modules/mod-content/sandbox/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["db: needs a PostgreSQL server (JARVIS_TEST_PG_DSN or local initdb)"]
+markers = [
+    "db: needs a PostgreSQL server (JARVIS_TEST_PG_DSN or local initdb)",
+    "docker: starts the Compose stack in Docker (JARVIS_TEST_DOCKER=1)",
+]

@@ -14,8 +14,24 @@ services:
   ollama:
     networks: [net-inference, net-debug-loopback]
     ports: ["127.0.0.1:11434:11434"]
+  # n8n editors for building workflows. One loopback bridge each, so debug mode does not join
+  # two domains' services on a shared network.
+  n8n-trading:
+    networks: [net-mcp-trading, net-debug-n8n-trading]
+    ports: ["127.0.0.1:5681:5678"]
+  n8n-content:
+    networks: [net-mcp-content, net-debug-n8n-content]
+    ports: ["127.0.0.1:5682:5678"]
+  n8n-private:
+    networks: [net-mcp-private, net-debug-n8n-private]
+    ports: ["127.0.0.1:5683:5678"]
+
+x-loopback: &loopback
+  driver_opts:
+    com.docker.network.bridge.enable_ip_masquerade: "false"
 
 networks:
-  net-debug-loopback:
-    driver_opts:
-      com.docker.network.bridge.enable_ip_masquerade: "false"
+  net-debug-loopback: *loopback
+  net-debug-n8n-trading: *loopback
+  net-debug-n8n-content: *loopback
+  net-debug-n8n-private: *loopback

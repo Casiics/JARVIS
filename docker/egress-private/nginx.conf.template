@@ -1,0 +1,44 @@
+# Egress for the private domain (docs/architecture.md, section 6.4): CalDAV and IMAP only.
+#
+# n8n-private resolves the two configured host names to this proxy (extra_hosts in compose)
+# and connects as usual, so TLS is verified end to end against the real server. The proxy
+# reads only the SNI name (ssl_preread) and forwards the raw TCP stream when name and port
+# match exactly. Everything else is closed. There is no SMTP: mail stays a draft (IMAP).
+# Rendered by envsubst at start; only the variables named in compose are substituted.
+
+worker_processes 1;
+pid /tmp/nginx.pid;
+error_log stderr warn;
+
+events {
+    worker_connections 256;
+}
+
+stream {
+    resolver 127.0.0.11 ipv6=off valid=300s;
+    resolver_timeout 5s;
+
+    log_format jarvis '$time_iso8601 $remote_addr "$ssl_preread_server_name:$server_port" '
+                      '$status $upstream_addr $session_time';
+    access_log /dev/stdout jarvis;
+
+    map "$ssl_preread_server_name:$server_port" $jarvis_upstream {
+        "${JARVIS_CALDAV_HOST}:443" "${JARVIS_CALDAV_HOST}:443";
+        "${JARVIS_IMAP_HOST}:993" "${JARVIS_IMAP_HOST}:993";
+        default "";
+    }
+
+    server {
+        listen 443;
+        ssl_preread on;
+        proxy_connect_timeout 10s;
+        proxy_pass $jarvis_upstream;
+    }
+
+    server {
+        listen 993;
+        ssl_preread on;
+        proxy_connect_timeout 10s;
+        proxy_pass $jarvis_upstream;
+    }
+}

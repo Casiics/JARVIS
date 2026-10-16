@@ -54,6 +54,43 @@ jobs:
         run: |
           docker compose -f docker/docker-compose.yml config -q
           docker compose -f docker/docker-compose.yml -f docker/docker-compose.models.yml config -q
+          docker compose -f docker/docker-compose.yml -f docker/docker-compose.debug.yml config -q
+
+  policies:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: OPA policy tests
+        run: |
+          opa="docker run --rm -v $PWD/policies:/policies:ro openpolicyagent/opa:1.21.2-static"
+          $opa check --strict /policies/mcp
+          $opa test -v /policies/mcp
+          test -z "$($opa fmt --list /policies/mcp)" || { echo "run opa fmt -w"; exit 1; }
+      - name: Proxy configurations parse
+        run: |
+          docker run --rm --entrypoint envoy -v $PWD/docker/mcp-gateway/envoy.yaml:/e.yaml:ro \
+            envoyproxy/envoy:v1.37.2 --mode validate -c /e.yaml
+          docker run --rm --entrypoint /usr/sbin/squid \
+            -v $PWD/docker/egress/squid.conf:/etc/jarvis/squid.conf:ro \
+            -v $PWD/policies/egress/core.allow:/etc/jarvis/egress.allow:ro \
+            ubuntu/squid:6.6-24.04_beta -k parse -f /etc/jarvis/squid.conf
+          docker run --rm --entrypoint sh -e JARVIS_CALDAV_HOST=cal.example.org \
+            -e JARVIS_IMAP_HOST=imap.example.org \
+            -v $PWD/docker/egress-private/nginx.conf.template:/t:ro nginx:1.28.0-alpine -c \
+            'envsubst "\$JARVIS_CALDAV_HOST \$JARVIS_IMAP_HOST" < /t > /tmp/n.conf && nginx -t -c /tmp/n.conf'
+
+  # Phase 4 exit criterion: the real stack in Docker, probed from each network position.
+  isolation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest -v -m docker tests/isolation
+        env:
+          JARVIS_TEST_DOCKER: "1"
 
   secrets-scan:
     runs-on: ubuntu-24.04

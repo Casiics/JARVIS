@@ -1,7 +1,11 @@
-# JARVIS data plane, Phase 1 (docs/architecture.md, sections 7 and 8).
+# JARVIS data plane and isolation services (docs/architecture.md, sections 7 and 8).
 #
 # - One Postgres instance per domain plus a separate audit instance.
-# - Every network is internal: containers have no route to the internet.
+# - Every network is internal except net-egress, which only the egress proxies join. Nothing
+#   else has a route to the internet; outbound traffic goes through the domain's proxy and its
+#   allowlist in policies/egress/.
+# - Each domain's MCP server (its n8n) sits on net-mcp-<domain>. Agents on net-<domain> reach
+#   it only through the domain's policy gateway (Envoy + OPA, policies/mcp/).
 # - No host ports. Debug access goes through docker-compose.debug.yml.
 # - Secrets are files decrypted from SOPS by scripts/secrets-unpack.sh into
 #   ${JARVIS_SECRETS_DIR}/<domain>/<key> (tmpfs). Each service mounts only its own domain's files.
@@ -22,6 +26,80 @@ x-postgres: &postgres
     interval: 10s
     timeout: 5s
     retries: 5
+
+x-egress: &egress
+  image: ubuntu/squid:6.6-24.04_beta
+  restart: unless-stopped
+  user: "13:13"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  entrypoint: ["/usr/sbin/squid", "-N", "-f", "/etc/jarvis/squid.conf"]
+  tmpfs: [/var/spool/squid, /var/log/squid, /run]
+  healthcheck:
+    test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3128"]
+    interval: 10s
+    timeout: 3s
+    retries: 5
+
+x-n8n: &n8n
+  image: n8nio/n8n:2.44.3
+  restart: unless-stopped
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  # n8n compiles static assets into ~/.cache on start; nothing there needs to persist.
+  tmpfs: [/tmp, "/home/node/.cache:uid=1000,gid=1000"]
+  environment: &n8n-env
+    N8N_ENCRYPTION_KEY_FILE: /run/secrets/n8n_encryption_key
+    N8N_PUBLIC_API_DISABLED: "true"
+    N8N_DIAGNOSTICS_ENABLED: "false"
+    N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+    N8N_TEMPLATES_ENABLED: "false"
+    N8N_PERSONALIZATION_ENABLED: "false"
+    N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+    N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+    N8N_RESTRICT_FILE_ACCESS_TO: /home/node/.n8n-files
+    N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+    NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.ssh","n8n-nodes-base.localFileTrigger","n8n-nodes-base.readWriteFile","n8n-nodes-base.git"]'
+    EXECUTIONS_DATA_PRUNE: "true"
+    EXECUTIONS_DATA_MAX_AGE: "336"
+    GENERIC_TIMEZONE: Europe/Berlin
+    N8N_LISTEN_ADDRESS: 0.0.0.0
+    NO_PROXY: localhost,127.0.0.1
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null || exit 1"]
+    interval: 15s
+    timeout: 5s
+    retries: 10
+
+x-mcp-gateway: &mcp-gateway
+  image: envoyproxy/envoy:v1.37.2
+  restart: unless-stopped
+  user: "101:101"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  entrypoint: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+  volumes:
+    - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
+
+x-opa: &opa
+  image: openpolicyagent/opa:1.21.2-envoy-static
+  restart: unless-stopped
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  command:
+    - run
+    - --server
+    - --addr=127.0.0.1:8181
+    - --config-file=/etc/opa/opa.yaml
+    - /policies/mcp/authz.rego
+    - /policies/mcp/log_mask.rego
+    - /policies/data.json
 
 services:
   # --- core -----------------------------------------------------------------------------------
@@ -61,6 +139,13 @@ services:
     secrets:
       - { source: core_redis_password, target: redis_password }
 
+  egress-core:
+    <<: *egress
+    networks: [net-core, net-egress]
+    volumes:
+      - ./egress/squid.conf:/etc/jarvis/squid.conf:ro
+      - ../policies/egress/core.allow:/etc/jarvis/egress.allow:ro
+
   # --- trading --------------------------------------------------------------------------------
   pg-trading:
     <<: *postgres
@@ -72,6 +157,40 @@ services:
       - { source: trading_pg_superuser_password, target: pg_superuser_password }
       - { source: trading_pg_app_password, target: pg_app_password }
       - { source: trading_pg_agent_ro_password, target: pg_agent_ro_password }
+
+  egress-trading:
+    <<: *egress
+    networks: [net-mcp-trading, net-egress]
+    volumes:
+      - ./egress/squid.conf:/etc/jarvis/squid.conf:ro
+      - ../policies/egress/trading.allow:/etc/jarvis/egress.allow:ro
+
+  n8n-trading:
+    <<: *n8n
+    networks:
+      net-mcp-trading: { aliases: [mcp-upstream] }
+    environment:
+      <<: *n8n-env
+      HTTP_PROXY: http://egress-trading:3128
+      HTTPS_PROXY: http://egress-trading:3128
+    volumes:
+      - n8n_trading_data:/home/node/.n8n
+    secrets:
+      - { source: trading_n8n_encryption_key, target: n8n_encryption_key }
+
+  opa-trading:
+    <<: *opa
+    networks:
+      net-mcp-trading: { aliases: [opa] }
+    volumes:
+      - ./mcp-gateway/opa.yaml:/etc/opa/opa.yaml:ro
+      - ../policies/mcp:/policies/mcp:ro
+      - ../policies/mcp-tools/trading.json:/policies/data.json:ro
+
+  mcp-gateway-trading:
+    <<: *mcp-gateway
+    networks: [net-trading, net-mcp-trading]
+    depends_on: [opa-trading]
 
   # --- content --------------------------------------------------------------------------------
   pg-content:
@@ -98,6 +217,49 @@ services:
       - qdrant_content_data:/qdrant/storage
     secrets:
       - { source: content_qdrant_api_key, target: qdrant_api_key }
+
+  egress-content:
+    <<: *egress
+    networks: [net-mcp-content, net-egress]
+    volumes:
+      - ./egress/squid.conf:/etc/jarvis/squid.conf:ro
+      - ../policies/egress/content.allow:/etc/jarvis/egress.allow:ro
+
+  n8n-content:
+    <<: *n8n
+    networks:
+      net-mcp-content: { aliases: [mcp-upstream] }
+    environment:
+      <<: *n8n-env
+      HTTP_PROXY: http://egress-content:3128
+      HTTPS_PROXY: http://egress-content:3128
+    volumes:
+      - n8n_content_data:/home/node/.n8n
+    secrets:
+      - { source: content_n8n_encryption_key, target: n8n_encryption_key }
+
+  opa-content:
+    <<: *opa
+    networks:
+      net-mcp-content: { aliases: [opa] }
+    volumes:
+      - ./mcp-gateway/opa.yaml:/etc/opa/opa.yaml:ro
+      - ../policies/mcp:/policies/mcp:ro
+      - ../policies/mcp-tools/content.json:/policies/data.json:ro
+
+  mcp-gateway-content:
+    <<: *mcp-gateway
+    networks: [net-content, net-mcp-content]
+    depends_on: [opa-content]
+
+  # The reel fetch sandbox (mod_content.reel.sandbox) joins jarvis-sandbox-egress and reaches
+  # only the hosts in policies/egress/reel.allow.
+  egress-reel:
+    <<: *egress
+    networks: [net-sandbox-egress, net-egress]
+    volumes:
+      - ./egress/squid.conf:/etc/jarvis/squid.conf:ro
+      - ../policies/egress/reel.allow:/etc/jarvis/egress.allow:ro
 
   # --- private (Life-OS) ----------------------------------------------------------------------
   pg-private:
@@ -139,6 +301,60 @@ services:
     secrets:
       - { source: private_redis_password, target: redis_password }
 
+  # CalDAV and IMAP only, as a TLS passthrough (docker/egress-private/nginx.conf.template).
+  # n8n-private resolves the two host names to this proxy's fixed address.
+  egress-private:
+    image: nginx:1.28.0-alpine
+    restart: unless-stopped
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    networks:
+      net-mcp-private: { ipv4_address: 10.213.40.2 }
+      net-egress: {}
+    environment:
+      JARVIS_CALDAV_HOST: ${JARVIS_CALDAV_HOST:-caldav.invalid}
+      JARVIS_IMAP_HOST: ${JARVIS_IMAP_HOST:-imap.invalid}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        envsubst '$$JARVIS_CALDAV_HOST $$JARVIS_IMAP_HOST'
+        < /etc/jarvis/nginx.conf.template > /tmp/nginx.conf
+        && exec nginx -c /tmp/nginx.conf -g 'daemon off;'
+    tmpfs: [/tmp]
+    volumes:
+      - ./egress-private/nginx.conf.template:/etc/jarvis/nginx.conf.template:ro
+
+  n8n-private:
+    <<: *n8n
+    networks:
+      net-mcp-private: { aliases: [mcp-upstream] }
+    extra_hosts:
+      - "${JARVIS_CALDAV_HOST:-caldav.invalid}:10.213.40.2"
+      - "${JARVIS_IMAP_HOST:-imap.invalid}:10.213.40.2"
+    volumes:
+      - n8n_private_data:/home/node/.n8n
+    secrets:
+      - { source: private_n8n_encryption_key, target: n8n_encryption_key }
+
+  opa-private:
+    <<: *opa
+    networks:
+      net-mcp-private: { aliases: [opa] }
+    volumes:
+      - ./mcp-gateway/opa.yaml:/etc/opa/opa.yaml:ro
+      - ../policies/mcp:/policies/mcp:ro
+      - ../policies/mcp-tools/private.json:/policies/data.json:ro
+
+  mcp-gateway-private:
+    <<: *mcp-gateway
+    networks: [net-private, net-mcp-private]
+    depends_on: [opa-private]
+
   # --- inference ------------------------------------------------------------------------------
   # One GPU (RTX 4070 Ti, 12 GB): one Ollama instance, one model loaded at a time.
   # Reachable only by the model router (joins net-inference in a later phase), never by agents.
@@ -167,6 +383,19 @@ networks:
   net-content: { internal: true }
   net-private: { internal: true }
   net-inference: { internal: true }
+  net-mcp-trading: { internal: true }
+  net-mcp-content: { internal: true }
+  net-mcp-private:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.213.40.0/24
+          # Dynamic addresses come from the upper half; egress-private keeps 10.213.40.2.
+          ip_range: 10.213.40.128/25
+  # Fixed name: the sandbox runner starts reel fetch containers on it (EngineConfig).
+  net-sandbox-egress: { internal: true, name: jarvis-sandbox-egress }
+  # The only network with a route out. Members: egress-* proxies, nothing else.
+  net-egress: {}
 
 volumes:
   pg_audit_data:
@@ -179,6 +408,9 @@ volumes:
   qdrant_content_data:
   qdrant_private_data:
   ollama_models:
+  n8n_trading_data:
+  n8n_content_data:
+  n8n_private_data:
 
 secrets:
   core_pg_audit_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_audit_superuser_password" }
@@ -195,6 +427,9 @@ secrets:
   content_pg_app_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/pg_app_password" }
   content_pg_agent_ro_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/pg_agent_ro_password" }
   content_qdrant_api_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/qdrant_api_key" }
+  trading_n8n_encryption_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/trading/n8n_encryption_key" }
+  content_n8n_encryption_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/content/n8n_encryption_key" }
+  private_n8n_encryption_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/n8n_encryption_key" }
   private_pg_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/pg_superuser_password" }
   private_pg_app_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/pg_app_password" }
   private_pg_agent_ro_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/pg_agent_ro_password" }

@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
         static_dir=args.static,
         secure_cookies=args.origin.startswith("https://"),
     )
-    # Credentials and approvals move to pg-core with the Phase 4 services.
+    # Credentials and approvals move to pg-core together with the orchestrator service.
     deps = GatewayDeps(
         credentials=FileCredentialStore(args.data_dir / "credentials.json"),
         approvals=FileApprovalStore(args.data_dir / "approvals.json"),

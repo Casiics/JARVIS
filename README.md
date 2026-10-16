@@ -13,6 +13,7 @@ Four security domains share one platform but never share data, credentials or ne
 - Phase 1 (foundation), done: core contracts, boundary policy, action gate, model routing policy, task state machine, hash-chained audit log, per-domain secrets and data stores.
 - Phase 2 (reel pipeline), implemented: sandboxed download and media extraction, local transcription and keyframe reading, a quarantined extraction worker without tools, Tier 0b gate, follow-up proposals through the boundary policy, cost and audit report. See [`docs/runbooks/reel-pipeline.md`](docs/runbooks/reel-pipeline.md). The exit criterion (20 real reels) needs a run on the workstation.
 - Phase 3 (command deck), implemented: API gateway with passkey login, approval deck in which every decision is its own passkey ceremony, single-use approval grants checked before execution, live metadata-only telemetry, and the seven-dashboard frame in the Glass HUD style. See [`docs/runbooks/command-deck.md`](docs/runbooks/command-deck.md).
+- Phase 4 (isolation services), implemented: egress proxies with per-domain allowlists, one n8n per domain, a policy gateway (Envoy + OPA) as the only path from agents to their tools, a CalDAV/IMAP-only exit for the private domain, and the git gateway for `auto-improve/*` PRs. Live network tests run in Docker. See [`docs/runbooks/isolation-services.md`](docs/runbooks/isolation-services.md).
 
 ## Quick start
 
