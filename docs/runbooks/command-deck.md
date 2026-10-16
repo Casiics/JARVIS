@@ -25,11 +25,24 @@ uv run python -m jarvis_core.api \
     --static apps/deck/dist --audit-dsn "$JARVIS_AUDIT_WRITER_DSN"
 ```
 
-Caddy terminates TLS on the tailnet and proxies to `127.0.0.1:8080`, including the WebSocket at `/ws/telemetry`. WebAuthn needs a real https origin (or `http://localhost` for local trials) and the `--rp-id` must be that host name.
+### TLS on the tailnet (`edge-caddy`)
+
+The compose service `edge-caddy` (profile `edge`) terminates TLS 1.3 on the host's tailnet address and proxies to the gateway on `127.0.0.1:8080`, including the WebSocket at `/ws/telemetry`. It binds nothing but the tailnet address, has no admin API and no ACME client, and refuses to start without `JARVIS_TAILNET_IP` (a `100.x` address) and `JARVIS_DECK_HOST`. The certificate comes from `tailscale cert` on the host, so Caddy never touches tailscaled:
+
+```bash
+sudo install -d -m 0750 -o root -g 1000 /etc/jarvis/tls
+sudo tailscale cert --cert-file /etc/jarvis/tls/deck.crt --key-file /etc/jarvis/tls/deck.key \
+    jarvis.<tailnet>.ts.net
+sudo chgrp 1000 /etc/jarvis/tls/deck.* && sudo chmod 0640 /etc/jarvis/tls/deck.*
+export JARVIS_DECK_HOST=jarvis.<tailnet>.ts.net JARVIS_TAILNET_IP=$(tailscale ip -4)
+docker compose -f docker/docker-compose.yml --profile edge up -d edge-caddy
+```
+
+The deck is then at `https://jarvis.<tailnet>.ts.net:8443` (`JARVIS_DECK_TLS_PORT` changes the port); start the gateway with that exact `--origin` and `--rp-id jarvis.<tailnet>.ts.net`. Renew the certificate with a monthly host timer running the `tailscale cert` line, then `docker compose ... restart edge-caddy`. WebAuthn needs a real https origin (or `http://localhost` for local trials).
 
 **First start:** open the deck, choose "Erster Start: Passkey einrichten" and enter the bootstrap code from `/run/jarvis/secrets/core/deck_bootstrap_code`. The code works only while no passkey exists. Further devices are added from a signed-in session.
 
-**Local trial without a tailnet:** `scripts/deck-local.sh` builds the deck, creates throwaway secrets and starts it on `http://localhost:8080`, printing the setup code. It passes `--rp-id localhost --origin http://localhost:8080`; cookies are then sent without `Secure`, and the audit log stays in memory.
+**Local trial without a tailnet:** `scripts/deck-local.sh` builds the deck, creates throwaway secrets and starts it on `http://localhost:8080`, printing the setup code. It passes `--rp-id localhost --origin http://localhost:8080`; cookies are then sent without `Secure`, and the audit log is the file chain `<state>/data/audit.jsonl`.
 
 ## Security properties
 
@@ -37,7 +50,7 @@ Caddy terminates TLS on the tailnet and proxies to `127.0.0.1:8080`, including t
 - Every POST must come from the deck's origin as JSON; everything else gets 403 or 415.
 - CSP `default-src 'self'`, `frame-ancestors 'none'`, no referrer, no caching.
 - Telemetry over WebSocket needs a session and the deck origin. Events are metadata only (`contracts/telemetry.py`, mirrored by Zod in `apps/deck/src/schemas.ts`); anything with extra fields is dropped on both sides.
-- Passkeys and approvals are stored as 0600 JSON files under `--data-dir` until pg-core takes them over together with the orchestrator service. Without `--audit-dsn` the audit log stays in memory, and the gateway says so on start.
+- Passkeys and approvals are stored as 0600 JSON files under `--data-dir` until pg-core takes them over together with the orchestrator service. Without `--audit-dsn` the gateway keeps a hash-chained file log (`--audit-file`, default `<data-dir>/audit.jsonl`) that is verified on every start; a broken chain stops the gateway. Memory-only audit needs `--audit-memory` and is refused for an https origin.
 
 ## Known limits
 

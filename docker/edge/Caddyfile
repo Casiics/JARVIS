@@ -1,0 +1,33 @@
+# TLS edge for the command deck (net-edge in docs/architecture.md section 7.1).
+# Terminates TLS on the tailnet address only and proxies to the API gateway on the host's
+# loopback (python -m jarvis_core.api --host 127.0.0.1). Nothing listens on a public address.
+{
+	admin off
+	auto_https disable_redirects
+	persist_config off
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$JARVIS_DECK_HOST}:{$JARVIS_DECK_TLS_PORT:8443} {
+	bind {$JARVIS_TAILNET_IP}
+	# Tailnet certificate written by `tailscale cert` on the host (docs/runbooks/command-deck.md).
+	# Caddy never talks to tailscaled itself, so it holds no tailnet control.
+	tls /certs/deck.crt /certs/deck.key {
+		protocols tls1.3
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	# Includes the WebSocket at /ws/telemetry. The gateway trusts X-Forwarded-* only from
+	# 127.0.0.1 (uvicorn's default), which is where this proxy connects from.
+	reverse_proxy 127.0.0.1:{$JARVIS_DECK_UPSTREAM_PORT:8080} {
+		header_up X-Forwarded-Proto https
+	}
+	log {
+		output stderr
+		format json
+	}
+}

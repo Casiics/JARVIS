@@ -30,7 +30,7 @@ from jarvis_core.contracts.events import BoundaryEvent, ReelSubmitted, Taint, Ta
 from jarvis_core.contracts.reel_url import InvalidReelUrl, canonical_reel_url
 from jarvis_core.contracts.task_token import issue_token
 from jarvis_core.orchestrator.state_machine import TaskState
-from jarvis_core.router.budget import CircuitBreaker, InMemorySpendLedger
+from jarvis_core.router.budget import CircuitBreaker, FileSpendLedger
 from jarvis_core.router.client import OllamaClient
 from jarvis_core.router.gateway import InferenceGateway
 from mod_content.reel.pipeline import (
@@ -97,6 +97,13 @@ def _pipeline_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--media-image", default=SandboxImages.media)
     parser.add_argument("--whisper-image", default=SandboxImages.whisper)
     parser.add_argument("--keep-media", action="store_true")
+    parser.add_argument(
+        "--spend-ledger",
+        type=Path,
+        default=None,
+        help="FinOps spend ledger shared with other workers on this host "
+        "(default: <data-dir>/spend.jsonl); survives restarts",
+    )
     parser.add_argument(
         "--show-sandbox-errors",
         action="store_true",
@@ -168,7 +175,7 @@ def _build(
     audit = CountingSink(AuditWriter(FileAuditStore(data / "audit.jsonl")).write)
     gateway = InferenceGateway(
         local=OllamaClient(args.ollama_url),
-        breaker=CircuitBreaker(InMemorySpendLedger()),
+        breaker=CircuitBreaker(FileSpendLedger(args.spend_ledger or data / "spend.jsonl")),
         audit=audit,
         actor="spiffe://jarvis.home/core/model-router",
     )
