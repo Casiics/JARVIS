@@ -17,6 +17,7 @@ from jarvis_core.audit.chain import (
     compute_hash,
     verify_chain,
 )
+from jarvis_core.audit.checkpoint import Checkpoint
 
 
 class FileAuditStore:
@@ -54,3 +55,28 @@ class FileAuditStore:
                     item = json.loads(line)
                     out.append(ChainedEntry(item["payload"], item["prev"], item["hash"]))
         return out
+
+
+class FileCheckpointStore:
+    """Signed checkpoints for a file chain, one JSON line each, next to the chain file."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def last(self) -> Checkpoint | None:
+        items = self.all()
+        return items[-1] if items else None
+
+    def append(self, checkpoint: Checkpoint) -> None:
+        with self._path.open("a", encoding="utf-8") as fh:
+            fh.write(checkpoint.model_dump_json() + "\n")
+        self._path.chmod(0o600)
+
+    def all(self) -> list[Checkpoint]:
+        if not self._path.exists():
+            return []
+        return [
+            Checkpoint.model_validate_json(line)
+            for line in self._path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]

@@ -33,6 +33,10 @@ jobs:
       - run: uv run mypy
       - run: uv run mypy tests
       - run: uv run pytest -v
+      # Phase 7 exit criterion, named so a failure is visible on its own: a self-improvement
+      # PR against the risk engine or the order path is refused by the git gateway.
+      - name: Auto-PR against the risk engine is rejected
+        run: uv run pytest -v tests/selfimprove/test_exit_criterion.py
 
   deck:
     runs-on: ubuntu-24.04
@@ -80,6 +84,7 @@ jobs:
             'envsubst "\$JARVIS_CALDAV_HOST \$JARVIS_IMAP_HOST" < /t > /tmp/n.conf && nginx -t -c /tmp/n.conf'
 
   # Phase 4 exit criterion: the real stack in Docker, probed from each network position.
+  # Also runs the Phase 7 audit keeper and workload CA live (builds the keeper image).
   isolation:
     runs-on: ubuntu-24.04
     steps:

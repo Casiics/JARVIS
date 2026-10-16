@@ -185,7 +185,7 @@ No LLM ever places an order or knows broker credentials.
 
 1. Nightly the self-audit reads audit metadata: high-retry tasks, escalations, cost outliers, Tier 0 failure patterns. No private content.
 2. A worker proposes changes in a sandboxed git worktree; the full test suite runs there.
-3. The git gateway pushes `auto-improve/<date>-<topic>` and opens a PR; changes to protected paths are rejected.
+3. The git gateway pushes `auto-improve/<date>-<topic>` and opens a PR; changes to protected paths and to the gateway's own guarded paths (its code, git metadata, the trading executor and broker) are rejected. Skills land the same way, as one new `skills/<domain>/<name>/SKILL.md` (`core/jarvis_core/selfimprove/`).
 4. A human merges.
 
 ## 7. Zero-trust security
@@ -194,7 +194,7 @@ The full concept, including the threat model, lives in the project's Zero-Trust 
 
 ### 7.1 Identity
 
-- Workload identities per domain and role (SPIRE or step-ca, short-lived mTLS certificates) arrive in a later phase. Until then, the domain is fixed per container by configuration and network.
+- Workload identities per domain and role: step-ca issues 24-hour certificates with SPIFFE IDs `spiffe://jarvis.home/<domain>/<service>` into each domain's own volume (decision 12, [`runbooks/audit-hardening.md`](runbooks/audit-hardening.md)). Services do not check them yet; until mTLS is wired in, the domain is fixed per container by configuration and network.
 - Signed task tokens scope each worker to one task (`core/jarvis_core/contracts/task_token.py`).
 - Humans sign in to the dashboard with a passkey over Tailscale only. Approvals for orders, publishing, self-modification and new n8n workflows need a fresh passkey confirmation.
 
@@ -252,14 +252,14 @@ Only a human changes these. CODEOWNERS requires owner review; the git gateway re
 | Store | Content | Isolation |
 |---|---|---|
 | `pg-core` | Tasks, states, approvals, budgets | `net-core` |
-| `pg-audit` | Audit chain | `net-core`; writer may only call `audit.append()` and `audit.head()` |
+| `pg-audit` | Audit chain and signed checkpoints | `net-core`; writer may only call `audit.append()`, `audit.head()`, `audit.tip()`, `audit.last_checkpoint()` and `audit.checkpoint_append()` |
 | `pg-trading`, `pg-content`, `pg-private` | Domain data | One instance per domain; role `app` for executors, `agent_ro` sees only `agent_views` |
 | `qdrant-content`, `qdrant-private` | Vectors | One instance per domain that needs one |
 | `redis-core`, `redis-private` | Bus, queues, budget counters; private-internal queues | Separate instances |
 
 The semantic cache is per domain and never stores `CONFIDENTIAL`, `PRIVATE` or `SECRET`; the private domain has no cache.
 
-**Audit chain.** `entry_hash = SHA-256(prev_hash || canonical payload)`. The database re-checks every link inside `audit.append()` and blocks UPDATE, DELETE and TRUNCATE for every role. Entries hold hashes and references, never content; private-domain entries hold metadata only. Later phases add an hourly signature of the chain head and a daily WORM export.
+**Audit chain.** `entry_hash = SHA-256(prev_hash || canonical payload)`. The database re-checks every link inside `audit.append()` and blocks UPDATE, DELETE and TRUNCATE for every role. Entries hold hashes and references, never content; private-domain entries hold metadata only. Every hour `audit-keeper` signs the chain head (Ed25519 checkpoint, checked by `audit.checkpoint_append()`), and every day it exports the entries up to the newest checkpoint as read-only bundles that verify offline with the public key ([`runbooks/audit-hardening.md`](runbooks/audit-hardening.md)).
 
 **Retention.** Trading decisions 5 years; agent decisions at least 6 months; private-domain metadata 12 months; telemetry 14 days.
 
@@ -291,5 +291,5 @@ Each phase ends with an exit criterion that must hold before the next starts.
    Exit: a network test shows the private domain reaches only CalDAV and IMAP (`tests/isolation/test_private_live.py`, `test_isolation_live.py`).
 6. **Trading domain** with `BrokerAdapter`, risk gate and kill switch; paper/testnet only (implemented in `modules/mod-trading/`, risk engine in `modules/mod-trading/risk/`; runbook: [`runbooks/trading-paper.md`](runbooks/trading-paper.md)). Orders pass the action gate, the non-LLM risk engine and a fail-closed kill switch before the paper broker; backtests use the same path.
    Exit: several weeks of paper trading without risk-limit violations before a live key exists. Open: needs a market-data feed through `n8n-trading`.
-7. **Self-improvement** and operations hardening (SPIRE, WORM export, chain signatures).
-   Exit: a deliberate auto-PR against the risk gate is rejected.
+7. **Self-improvement** and operations hardening (implemented: skill proposals in `core/jarvis_core/selfimprove/`, signed audit checkpoints and WORM export in `core/jarvis_core/audit/`, step-ca workload certificates in `docker/pki/`; runbook: [`runbooks/audit-hardening.md`](runbooks/audit-hardening.md)).
+   Exit: a deliberate auto-PR against the risk gate is rejected (`tests/selfimprove/test_exit_criterion.py`, its own CI step).

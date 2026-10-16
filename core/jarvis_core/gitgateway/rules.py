@@ -23,12 +23,16 @@ PROTECTED_PATHS: tuple[str, ...] = (
     "CLAUDE.md",
 )
 
-# Also refused, because they would change how the gateway itself or git behaves: the gateway's
-# own code, submodule definitions and attribute-driven filters.
+# Also refused, because they would change how the gateway itself or git behaves (its own code,
+# submodule definitions, attribute-driven filters), or would let an order reach a broker
+# without the risk engine (the trading executor and broker adapters). .github/CODEOWNERS lists
+# these after the protected paths, so a human code owner reviews them too.
 GATEWAY_GUARDED_PATHS: tuple[str, ...] = (
     "core/jarvis_core/gitgateway/",
     ".gitmodules",
     ".gitattributes",
+    "modules/mod-trading/mod_trading/executor.py",
+    "modules/mod-trading/mod_trading/broker.py",
 )
 
 BRANCH_PREFIX = "auto-improve/"

@@ -14,6 +14,8 @@ db = ["psycopg[binary]>=3.2,<4"]
 gateway = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "websockets>=15,<17", "webauthn>=3.0,<4"]
 # Git gateway (core): signs GitHub App JWTs.
 gitgateway = ["cryptography>=45,<51"]
+# Audit checkpoints and WORM export (Ed25519 signatures).
+audit = ["cryptography>=45,<51"]
 
 [dependency-groups]
 dev = [

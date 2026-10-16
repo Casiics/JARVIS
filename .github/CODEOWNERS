@@ -11,3 +11,11 @@
 /.github/                                 @Casiics
 /.claude/                                 @Casiics
 /CLAUDE.md                                @Casiics
+
+# Guarded by the git gateway as well (core/jarvis_core/gitgateway/rules.py): the gateway itself,
+# git metadata, and the trading order path, which must never bypass the risk engine.
+/core/jarvis_core/gitgateway/             @Casiics
+/.gitmodules                              @Casiics
+/.gitattributes                           @Casiics
+/modules/mod-trading/mod_trading/executor.py  @Casiics
+/modules/mod-trading/mod_trading/broker.py    @Casiics
