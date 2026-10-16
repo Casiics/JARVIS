@@ -1,0 +1,10 @@
+annotated-types==0.8.0
+cffi==2.1.1
+cryptography==50.0.2
+psycopg==3.3.6
+psycopg-binary==3.3.6
+pycparser==3.11
+pydantic==2.14.1
+pydantic-core==2.50.1
+typing-extensions==4.16.0
+typing-inspection==0.4.4

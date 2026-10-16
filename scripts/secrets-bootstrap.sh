@@ -12,10 +12,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SECRETS_DIR="$REPO_ROOT/secrets"
 
 declare -A KEYS=(
-  [core]="pg_audit_superuser_password pg_audit_writer_password pg_audit_reader_password pg_superuser_password pg_app_password pg_agent_ro_password redis_password task_token_signing_key approval_grant_key deck_bootstrap_code"
-  [trading]="pg_superuser_password pg_app_password pg_agent_ro_password n8n_encryption_key"
+  [core]="pg_audit_superuser_password pg_audit_writer_password pg_audit_reader_password pg_superuser_password pg_app_password pg_agent_ro_password redis_password task_token_signing_key approval_grant_key deck_bootstrap_code audit_signing_key pki_ca_password pki_provisioner_password"
+  [trading]="pg_superuser_password pg_app_password pg_agent_ro_password n8n_encryption_key audit_signing_key"
   [content]="pg_superuser_password pg_app_password pg_agent_ro_password qdrant_api_key n8n_encryption_key"
-  [private]="pg_superuser_password pg_app_password pg_agent_ro_password qdrant_api_key redis_password n8n_encryption_key"
+  [private]="pg_superuser_password pg_app_password pg_agent_ro_password qdrant_api_key redis_password n8n_encryption_key audit_signing_key"
 )
 # Account credentials Jarvis cannot generate. They start empty; fill them in with
 # `sops secrets/<domain>.sops.yaml` once the account exists (docs/runbooks/private-domain.md).

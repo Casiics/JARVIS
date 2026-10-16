@@ -37,11 +37,16 @@ EXPECTED_NETWORKS = {
     "opa-private": {"net-mcp-private"},
     "mcp-gateway-private": {"net-private", "net-mcp-private"},
     "private-assistant": {"net-private-assistant", "net-inference-private"},
+    "audit-keeper": {"net-core"},
+    "pki-ca": {"net-pki"},
+    "pki-init": set(),
+    "pki-issue": {"net-pki"},
     "ollama": {"net-inference", "net-inference-private"},
 }
 
 DOMAIN_OF_NETWORK = {
     "net-core": "core",
+    "net-pki": "core",
     "net-trading": "trading",
     "net-mcp-trading": "trading",
     "net-content": "content",
@@ -57,12 +62,13 @@ DOMAIN_OF_NETWORK = {
 HARDENED = [
     s
     for s in EXPECTED_NETWORKS
-    if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-")) or s == "private-assistant"
+    if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-", "pki-"))
+    or s in {"private-assistant", "audit-keeper"}
 ]
 
 
 def networks_of(service: dict[str, Any]) -> set[str]:
-    networks = service["networks"]
+    networks = service.get("networks", {})
     return set(networks) if isinstance(networks, dict | list) else set()
 
 
@@ -123,7 +129,11 @@ def test_isolation_services_are_hardened(compose: dict[str, Any], service: str) 
     assert spec.get("read_only") is True
     assert spec.get("cap_drop") == ["ALL"]
     assert "no-new-privileges:true" in spec.get("security_opt", [])
-    assert spec.get("user"), f"{service} must not run as root"
+    assert spec.get("user"), f"{service} must set its user"
+    if service != "pki-issue":  # root without capabilities, see the compose comment
+        assert not str(spec["user"]).startswith("0"), f"{service} must not run as root"
+    # pki-ca: the step-ca binary needs this one capability to exec, see the compose comment.
+    assert spec.get("cap_add", []) == (["NET_BIND_SERVICE"] if service == "pki-ca" else [])
 
 
 @pytest.mark.parametrize("domain", ["trading", "content"])
@@ -218,3 +228,39 @@ def test_private_assistant_reads_secrets_where_the_provider_looks(
     for secret in service["secrets"]:
         key = secret["source"].removeprefix("private_")
         assert secret["target"] == f"/run/jarvis/secrets/private/{key}"
+
+
+def test_pki_init_has_no_network() -> None:
+    compose = yaml.safe_load(COMPOSE.read_text())
+    assert compose["services"]["pki-init"]["network_mode"] == "none"
+
+
+def test_only_the_issuer_joins_the_ca_and_writes_certificates(compose: dict[str, Any]) -> None:
+    on_pki = {n for n, s in compose["services"].items() if "net-pki" in networks_of(s)}
+    assert on_pki == {"pki-ca", "pki-issue"}
+    for name, service in compose["services"].items():
+        for volume in service.get("volumes", []):
+            if str(volume).startswith("pki_ca_data:"):
+                assert name in {"pki-ca", "pki-init"} or str(volume).endswith(":ro"), name
+            if str(volume).startswith("certs_"):
+                assert name == "pki-issue", f"{name} mounts {volume}"
+    issued = {
+        v.split(":")[0]: v.split(":")[1]
+        for v in compose["services"]["pki-issue"]["volumes"]
+        if v.startswith("certs_")
+    }
+    assert issued == {
+        f"certs_{d}": f"/certs/{d}" for d in ("core", "trading", "content", "private")
+    }
+
+
+def test_identities_stay_in_their_domain() -> None:
+    identities = (COMPOSE.parent / "pki/identities").read_text().splitlines()
+    domains = {line.split()[0] for line in identities if line and not line.startswith("#")}
+    assert domains <= {"core", "trading", "content", "private"}
+
+
+def test_audit_keeper_reads_its_key_where_the_provider_looks(compose: dict[str, Any]) -> None:
+    secrets = compose["services"]["audit-keeper"]["secrets"]
+    key = next(s for s in secrets if s["source"] == "core_audit_signing_key")
+    assert key["target"] == "/run/jarvis/secrets/core/audit_signing_key"

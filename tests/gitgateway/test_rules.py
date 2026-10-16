@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from jarvis_core.gitgateway.rules import (
+    GATEWAY_GUARDED_PATHS,
     PROTECTED_PATHS,
     FileChange,
     Reason,
@@ -31,10 +32,10 @@ def test_protected_paths_match_claude_md() -> None:
     assert tuple(listed) == PROTECTED_PATHS
 
 
-def test_protected_paths_match_codeowners() -> None:
+def test_protected_and_guarded_paths_match_codeowners() -> None:
     lines = (ROOT / ".github/CODEOWNERS").read_text().splitlines()
     owned = [line.split()[0].lstrip("/") for line in lines if line.startswith("/")]
-    assert tuple(owned) == PROTECTED_PATHS
+    assert tuple(owned) == PROTECTED_PATHS + GATEWAY_GUARDED_PATHS
 
 
 @pytest.mark.parametrize(
@@ -74,7 +75,13 @@ def test_neighbours_of_protected_paths_are_allowed(path: str) -> None:
 
 
 def test_gateway_guards_its_own_code_and_git_metadata() -> None:
-    for path in ("core/jarvis_core/gitgateway/rules.py", ".gitmodules", ".gitattributes"):
+    for path in (
+        "core/jarvis_core/gitgateway/rules.py",
+        ".gitmodules",
+        ".gitattributes",
+        "modules/mod-trading/mod_trading/executor.py",
+        "Modules/mod-trading/mod_trading/Broker.py",
+    ):
         assert [v.reason for v in check_changes([change(path)])] == [Reason.GUARDED_PATH]
 
 

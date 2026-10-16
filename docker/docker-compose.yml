@@ -392,6 +392,89 @@ services:
       - { source: private_imap_username, target: /run/jarvis/secrets/private/imap_username }
       - { source: private_imap_password, target: /run/jarvis/secrets/private/imap_password }
 
+  # --- operations hardening (Phase 7, docs/runbooks/audit-hardening.md) --------------------------
+  # Signs the audit chain's head (hourly) and exports sealed bundles for WORM storage (daily).
+  # One-shot: `docker compose run --rm audit-keeper checkpoint|export`, driven by host timers.
+  audit-keeper:
+    image: localhost/jarvis-audit-keeper:0.1.0
+    build:
+      context: ..
+      dockerfile: docker/audit-keeper/Dockerfile
+    profiles: [tools]
+    user: "10002:10002"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-core]
+    volumes:
+      - audit_worm:/worm
+    secrets:
+      - { source: core_pg_audit_writer_password, target: pg_audit_writer_password }
+      - { source: core_pg_audit_reader_password, target: pg_audit_reader_password }
+      - { source: core_audit_signing_key, target: /run/jarvis/secrets/core/audit_signing_key }
+
+  # Workload CA: short-lived X.509 certificates with SPIFFE IDs. No domain network reaches it;
+  # pki-issue writes each domain's certificates into that domain's own volume.
+  pki-ca:
+    image: smallstep/step-ca:0.29.0
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    # The step-ca binary carries the cap_net_bind_service file capability; the kernel refuses
+    # to exec it when that capability is missing from the bounding set. It binds :9000 only.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-pki]
+    entrypoint: ["/usr/local/bin/step-ca"]
+    command: ["--password-file", "/run/secrets/pki_ca_password", "/home/step/config/ca.json"]
+    volumes:
+      - pki_ca_data:/home/step
+    secrets:
+      - { source: core_pki_ca_password, target: pki_ca_password }
+
+  # Once, before pki-ca starts for the first time. No network at all.
+  pki-init:
+    image: smallstep/step-ca:0.29.0
+    profiles: [tools]
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: none
+    entrypoint: ["/bin/sh", "/etc/jarvis/pki-init.sh"]
+    tmpfs: [/tmp]
+    volumes:
+      - pki_ca_data:/home/step
+      - ./pki/init.sh:/etc/jarvis/pki-init.sh:ro
+    secrets:
+      - { source: core_pki_ca_password, target: pki_ca_password }
+      - { source: core_pki_provisioner_password, target: pki_provisioner_password }
+
+  # Every 8 hours (host timer): renew the 24-hour workload certificates in docker/pki/identities.
+  # Runs as uid 0 without any capability: new certificate volumes are root-owned, and root
+  # needs no capability to write into a directory it owns.
+  pki-issue:
+    image: smallstep/step-ca:0.29.0
+    profiles: [tools]
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-pki]
+    entrypoint: ["/bin/sh", "/etc/jarvis/pki-issue.sh"]
+    tmpfs: [/tmp]
+    volumes:
+      - pki_ca_data:/ca:ro
+      - ./pki/issue.sh:/etc/jarvis/pki-issue.sh:ro
+      - ./pki/identities:/etc/jarvis/identities:ro
+      - certs_core:/certs/core
+      - certs_trading:/certs/trading
+      - certs_content:/certs/content
+      - certs_private:/certs/private
+    secrets:
+      - { source: core_pki_provisioner_password, target: pki_provisioner_password }
+
   # --- inference ------------------------------------------------------------------------------
   # One GPU (RTX 4070 Ti, 12 GB): one Ollama instance, one model loaded at a time.
   # Reached by model routers only: the private assistant's router over net-inference-private,
@@ -439,6 +522,8 @@ networks:
       config:
         - subnet: 10.213.41.0/24
           ip_range: 10.213.41.128/25
+  # Workload CA and its issuing job only.
+  net-pki: { internal: true }
   # Fixed name: the sandbox runner starts reel fetch containers on it (EngineConfig).
   net-sandbox-egress: { internal: true, name: jarvis-sandbox-egress }
   # The only network with a route out. Members: egress-* proxies, nothing else.
@@ -459,6 +544,12 @@ volumes:
   n8n_content_data:
   n8n_private_data:
   private_assistant_data:
+  audit_worm:
+  pki_ca_data:
+  certs_core:
+  certs_trading:
+  certs_content:
+  certs_private:
 
 secrets:
   core_pg_audit_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_audit_superuser_password" }
@@ -487,3 +578,6 @@ secrets:
   private_caldav_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/caldav_password" }
   private_imap_username: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/imap_username" }
   private_imap_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/imap_password" }
+  core_audit_signing_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/audit_signing_key" }
+  core_pki_ca_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pki_ca_password" }
+  core_pki_provisioner_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pki_provisioner_password" }

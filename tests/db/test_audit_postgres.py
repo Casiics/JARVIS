@@ -16,14 +16,23 @@ import pytest
 from psycopg import conninfo
 
 from jarvis_core.audit.chain import AuditChainError, AuditWriter, ChainedEntry, verify_chain
-from jarvis_core.audit.postgres import PostgresAuditStore
+from jarvis_core.audit.checkpoint import (
+    CheckpointError,
+    key_id,
+    load_private_key,
+    next_checkpoint,
+    sign,
+    verify_log,
+)
+from jarvis_core.audit.postgres import PostgresAuditStore, PostgresCheckpointStore
 from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import Domain
 
 pytestmark = pytest.mark.db
 
 DSN = os.environ.get("JARVIS_TEST_PG_DSN")
-SQL = Path(__file__).parents[2] / "docker/postgres/audit/sql/audit.sql"
+SQL_DIR = Path(__file__).parents[2] / "docker/postgres/audit/sql"
+SQL_FILES = [SQL_DIR / "audit.sql", SQL_DIR / "checkpoints.sql"]  # order as in 10-init.sh
 DB = "jarvis_audit_test"
 PASSWORD = "test-only-password"  # noqa: S105
 
@@ -45,7 +54,8 @@ def audit_db() -> Iterator[None]:
         admin.execute("DROP ROLE IF EXISTS audit_reader")
         admin.execute(f"CREATE DATABASE {DB}")
     with psycopg.connect(_dsn(dbname=DB), autocommit=True) as conn:
-        conn.execute(SQL.read_text())
+        for sql in SQL_FILES:
+            conn.execute(sql.read_text())
         conn.execute(f"ALTER ROLE audit_writer LOGIN PASSWORD '{PASSWORD}'")
         conn.execute(f"ALTER ROLE audit_reader LOGIN PASSWORD '{PASSWORD}'")
     yield
@@ -107,3 +117,49 @@ def test_even_the_owner_cannot_update_or_delete(audit_db: None) -> None:
             conn.execute("DELETE FROM audit.log")
         with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
             conn.execute("TRUNCATE audit.log")
+
+
+# --- signed checkpoints ---------------------------------------------------------------------------
+
+KEY = load_private_key("11" * 32)
+KEYS = {key_id(KEY.public_key()): KEY.public_key()}
+
+
+def test_checkpoints_are_signed_stored_and_verified(audit_db: None) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    with _connect("audit_writer") as conn:
+        AuditWriter(PostgresAuditStore(conn)).write(_entry(10))
+        store = PostgresAuditStore(conn)
+        checkpoints = PostgresCheckpointStore(conn)
+        count, head = store.tip()
+        start = datetime.now(UTC)
+        next_checkpoint(count, head, checkpoints, KEY, start)
+        # The database refuses a checkpoint that goes backwards in time or position.
+        with pytest.raises(CheckpointError, match="backwards"):
+            checkpoints.append(sign(KEY, count, head, start - timedelta(hours=1)))
+        # ...and one that signs a head the log does not have.
+        with pytest.raises(CheckpointError, match="head does not match"):
+            checkpoints.append(sign(KEY, count, "c" * 64, start + timedelta(hours=1)))
+        with pytest.raises(CheckpointError, match="outside the log"):
+            checkpoints.append(sign(KEY, count + 5, head, start + timedelta(hours=1)))
+        assert checkpoints.last() is not None
+    with _connect("audit_reader") as conn:
+        reader = PostgresAuditStore(conn)
+        assert verify_log(reader.entries(), PostgresCheckpointStore(conn).all(), KEYS) == []
+
+
+def test_checkpoints_are_append_only(audit_db: None) -> None:
+    with psycopg.connect(_dsn(dbname=DB), autocommit=True) as conn:
+        for statement in (
+            "UPDATE audit.checkpoint SET body = '{}'",
+            "DELETE FROM audit.checkpoint",
+            "TRUNCATE audit.checkpoint",
+        ):
+            with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
+                conn.execute(statement)
+
+
+def test_reader_cannot_add_checkpoints(audit_db: None) -> None:
+    with _connect("audit_reader") as conn, pytest.raises(psycopg.errors.InsufficientPrivilege):
+        conn.execute("SELECT audit.checkpoint_append('{}')")

@@ -1,0 +1,8 @@
+# domain service: one workload identity per line (docs/runbooks/audit-hardening.md).
+core audit-keeper
+core git-gateway
+trading executor
+trading mcp-gateway-trading
+content mcp-gateway-content
+private assistant
+private mcp-gateway-private
