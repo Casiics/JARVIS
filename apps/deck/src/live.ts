@@ -194,3 +194,36 @@ export function useLiveTasks(): {
   );
   return { tasks, link, snapshotError };
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Escalations from the last 24 hours: what the top bar and the nav badge count. */
+export function recentEscalations(tasks: readonly OrchestratorTask[], now: number): number {
+  return tasks.filter(
+    (t) => t.state === "escalated" && now - Date.parse(t.updated_at) <= DAY_MS,
+  ).length;
+}
+
+/** Polls the orchestrator for the shell. A missing orchestrator simply counts as zero. */
+export function useEscalationCount(): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let stopped = false;
+    const load = (): void => {
+      getTasks()
+        .then((list) => {
+          if (!stopped) setCount(recentEscalations(list.tasks, Date.now()));
+        })
+        .catch(() => {
+          if (!stopped) setCount(0);
+        });
+    };
+    load();
+    const timer = window.setInterval(load, POLL_MS);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+  return count;
+}

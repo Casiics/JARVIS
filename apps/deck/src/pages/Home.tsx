@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { DOMAIN_LABEL, STATE_LABEL, formatAge } from "../format";
 import { useTelemetry } from "../telemetry";
 import { useAttentionContext } from "../useAttention";
@@ -51,6 +51,11 @@ export function Home() {
           Live-Agenten <span className="muted">({link === "live" ? "verbunden" : link === "connecting" ? "verbinde" : "getrennt"})</span>
         </h2>
         {tasks.length === 0 && <p className="muted">Gerade arbeitet kein Agent.</p>}
+        <p>
+          <Link to="/agents" className="more">
+            Schwarm, Aufgaben und Eskalationen ansehen →
+          </Link>
+        </p>
         <ul className="lanes">
           {tasks.map((t) => (
             <li key={t.task_id} className={`lane state-${t.state}`}>

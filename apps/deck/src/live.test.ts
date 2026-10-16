@@ -5,6 +5,7 @@ import {
   fromTelemetry,
   mergeLive,
   ordered,
+  recentEscalations,
   stageIndex,
   summarise,
   type LiveTask,
@@ -100,5 +101,18 @@ describe("summaries", () => {
     expect(errorHint("timeout")).toContain("Worker");
     expect(errorHint("something_new")).toContain("Worker-Log");
     expect(errorHint(null)).toBe("");
+  });
+});
+
+describe("recentEscalations", () => {
+  it("counts only escalations from the last day", () => {
+    const now = Date.parse("2026-10-16T12:00:00Z");
+    const base = OrchestratorTask.parse(snapshot);
+    const tasks = [
+      { ...base, state: "escalated" as const, updated_at: "2026-10-16T11:00:00+00:00" },
+      { ...base, state: "escalated" as const, updated_at: "2026-10-14T11:00:00+00:00" },
+      { ...base, state: "done" as const },
+    ];
+    expect(recentEscalations(tasks, now)).toBe(1);
   });
 });

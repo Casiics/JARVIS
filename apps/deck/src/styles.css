@@ -57,6 +57,8 @@ button.ghost { background: transparent; }
 .topbar .ghost { margin-left: auto; }
 .status-ok { color: var(--positive); }
 .status-warn { color: var(--warning); }
+.status-critical { color: var(--critical); text-decoration: none; }
+.badge-critical { background: var(--critical); color: #1a0604; }
 main { padding: 24px; }
 
 .card {
@@ -69,6 +71,7 @@ main { padding: 24px; }
   width: 100%; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; text-align: left;
   padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg);
 }
+.more { color: var(--accent); text-decoration: none; display: inline-block; min-height: 44px; line-height: 44px; }
 .queue-item .action { margin-left: auto; color: var(--accent); }
 .domain { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
 .domain-trading { color: var(--d-trading); }
