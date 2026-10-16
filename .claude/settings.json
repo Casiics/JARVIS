@@ -1,0 +1,58 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(pnpm *)",
+      "Bash(docker compose *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git checkout -b *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Read(**)",
+      "Edit(apps/**)",
+      "Edit(core/**)",
+      "Edit(modules/**)",
+      "Edit(mcp-servers/**)",
+      "Edit(skills/**)",
+      "Edit(tests/**)",
+      "Edit(docs/**)"
+    ],
+    "ask": [
+      "Edit(core/deterministic-gate/**)",
+      "Edit(modules/mod-trading/risk/**)",
+      "Edit(core/model-router/policy/**)",
+      "Edit(policies/**)",
+      "Edit(core/audit/**)",
+      "Edit(docker/**)",
+      "Edit(.github/**)",
+      "Edit(.claude/**)",
+      "Edit(CLAUDE.md)"
+    ],
+    "deny": [
+      "Read(.env*)",
+      "Edit(.env*)",
+      "Read(**/secrets/**)",
+      "Bash(git push --force*)",
+      "Bash(git push * main)",
+      "Bash(rm -rf /)*"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ruff check --fix --silent || true"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "PYTHONUNBUFFERED": "1",
+    "JARVIS_ENV": "development"
+  }
+}
