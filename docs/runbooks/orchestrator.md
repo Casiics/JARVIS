@@ -50,7 +50,7 @@ outcome = loop.run(
 )
 ```
 
-The task token must allow `agent.worker` (and `agent.supervisor` when a supervisor runs). Report the outcome to core with one `TaskMetadata` (state, duration, error class).
+The task token must allow `agent.worker` (and `agent.supervisor` when a supervisor runs). For live stages in the deck, pass `MetadataReporter(Mailbox(boundary_dir, Domain.CONTENT)).sink` as the loop's telemetry: each state change goes to core as one `TaskMetadata` (state, duration, error class), nothing else.
 
 ## Smoke test on the workstation
 
