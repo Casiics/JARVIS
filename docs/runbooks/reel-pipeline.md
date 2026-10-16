@@ -57,6 +57,8 @@ On the deck's **Content** page, paste a reel link (Instagram: Share → Copy lin
 uv run python -m mod_content.reel serve
 ```
 
+For the local deck trial (`scripts/deck-local.sh`), `scripts/reel-worker-local.sh` does all of this in one go: it builds both images with Docker (cached, and always current after a `git pull`), starts `egress-reel`, and runs the worker on the deck's mailbox with `--show-sandbox-errors`.
+
 Before the first reel, the worker checks that the engine runs, both images exist, and the `egress-reel` proxy is up on `jarvis-sandbox-egress`. If anything is missing it stops and names the command that fixes it (`--skip-preflight` turns the check off).
 
 On one host, the gateway and the worker share `/var/lib/jarvis/boundary`. With separate users, give `core-to-content/` to the gateway's user and `content-to-core/` to the worker's, each readable and deletable by the other through a shared group.
