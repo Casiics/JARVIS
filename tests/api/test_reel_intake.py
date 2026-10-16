@@ -169,3 +169,24 @@ def test_the_deck_lists_orchestrator_tasks_as_metadata(deck: Deck, tmp_path: Pat
     assert task["task_id"] == task_id and task["domain"] == "content"
     assert task["kind"] == "reel" and task["state"] == "running"
     assert CANONICAL not in res.text  # the goal stays behind its hash
+
+
+def test_reels_queued_before_the_orchestrator_are_adopted(tmp_path: Path) -> None:
+    from jarvis_core.api.reels import ReelSubmission
+    from jarvis_core.storage import write_atomic
+
+    legacy = ReelSubmission(
+        task_id=UUID("11111111-1111-4111-8111-111111111111"),
+        source_ref=CANONICAL,
+        submitted_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    write_atomic(tmp_path / "core/reels.json", b"[" + legacy.model_dump_json().encode() + b"]")
+    clock = lambda: datetime.now(UTC)  # noqa: E731
+    orchestrator = Orchestrator(Mailbox(tmp_path / "boundary", Domain.CORE), None, clock=clock)
+    desk = ReelDesk(orchestrator, tmp_path / "core/reels.json", clock=clock)
+    assert content(tmp_path).receive(Domain.CORE) == []  # nothing is sent again
+
+    report(tmp_path, str(legacy.task_id), "done")
+    desk.sync()
+    assert [s.status.value for s in desk.all()] == ["done"]

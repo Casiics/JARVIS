@@ -201,6 +201,36 @@ class Orchestrator:
         self._emit(record, "orchestrator:dispatch")
         return record
 
+    def adopt(self, task_id: UUID, goal: Goal, created_at: datetime) -> TaskRecord:
+        """Track a task that was dispatched before the orchestrator existed (or knew of it).
+
+        Sends nothing: the domain already has the task. Without this, reports for such tasks
+        would be ignored as unknown and the task would look open forever.
+        """
+        dispatcher = self._routes.get(goal.kind)
+        if dispatcher is None:
+            raise UnroutableGoal(goal.kind)
+        now = self._clock()
+        with self._lock:
+            known = self._tasks.get(task_id)
+            if known is not None:
+                return known
+            record = TaskRecord(
+                task_id=task_id,
+                kind=goal.kind,
+                domain=dispatcher.domain,
+                ref_hash=goal_hash(goal),
+                created_at=created_at,
+                updated_at=now,
+                deadline=now + self._deadline,
+            )
+            self._tasks[task_id] = record
+            self._save()
+        self._audit_entry(
+            record, f"adopt:{goal.kind}->{dispatcher.domain.value}", AuditDecision.ALLOW
+        )
+        return record
+
     def sync(self) -> list[TaskRecord]:
         """Apply every status report the domains sent since the last call."""
         changed: list[TaskRecord] = []
