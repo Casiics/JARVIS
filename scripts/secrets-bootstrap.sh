@@ -12,7 +12,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SECRETS_DIR="$REPO_ROOT/secrets"
 
 declare -A KEYS=(
-  [core]="pg_audit_superuser_password pg_audit_writer_password pg_audit_reader_password pg_superuser_password pg_app_password pg_agent_ro_password redis_password task_token_signing_key"
+  [core]="pg_audit_superuser_password pg_audit_writer_password pg_audit_reader_password pg_superuser_password pg_app_password pg_agent_ro_password redis_password task_token_signing_key approval_grant_key deck_bootstrap_code"
   [trading]="pg_superuser_password pg_app_password pg_agent_ro_password"
   [content]="pg_superuser_password pg_app_password pg_agent_ro_password qdrant_api_key"
   [private]="pg_superuser_password pg_app_password pg_agent_ro_password qdrant_api_key redis_password"

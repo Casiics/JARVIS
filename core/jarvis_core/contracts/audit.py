@@ -21,6 +21,7 @@ class AuditAction(StrEnum):
     SELF_MODIFICATION = "self_modification"
     WORKFLOW_DEPLOY = "workflow_deploy"
     BOUNDARY_EVENT = "boundary_event"
+    AUTH = "auth"
 
 
 class AuditDecision(StrEnum):
