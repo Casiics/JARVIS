@@ -1,7 +1,8 @@
-"""Append-only JSONL audit chain inside the private domain's volume.
+"""Append-only JSONL audit chain inside a domain's own volume.
 
-The private domain cannot reach pg-audit (net-core) yet, so its entries (metadata only:
+Domain services cannot reach pg-audit (net-core) yet, so their entries (metadata only:
 hashes, counts, states) are chained locally until the audit writer runs as a service.
+Used by the private assistant and the trading executor.
 """
 
 from __future__ import annotations

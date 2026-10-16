@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from mod_private.imap import ImapError, ImapMailbox, parse_message
 
+from mod_private.imap import ImapError, ImapMailbox, parse_message
 from tests.private.fakes import FakeImap, rfc822
 
 

@@ -28,6 +28,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from jarvis_core.audit.chain import AuditWriter
+from jarvis_core.audit.file import FileAuditStore
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.events import Taint
 from jarvis_core.contracts.task_token import TaskTokenClaims, issue_token, verify_token
@@ -36,7 +37,6 @@ from jarvis_core.router.client import OllamaClient
 from jarvis_core.router.gateway import InferenceGateway
 from jarvis_core.secrets.provider import SecretAccessError, UnpackedSopsProvider
 from mod_private.assistant import PRIVATE_TOOLS, PrivateAssistant
-from mod_private.auditfile import FileAuditStore
 from mod_private.caldav import CalDAVClient
 from mod_private.imap import ImapMailbox
 from mod_private.store import PrivateStore

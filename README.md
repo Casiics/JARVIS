@@ -15,6 +15,7 @@ Four security domains share one platform but never share data, credentials or ne
 - Phase 3 (command deck), implemented: API gateway with passkey login, approval deck in which every decision is its own passkey ceremony, single-use approval grants checked before execution, live metadata-only telemetry, and the seven-dashboard frame in the Glass HUD style. See [`docs/runbooks/command-deck.md`](docs/runbooks/command-deck.md).
 - Phase 4 (isolation services), implemented: egress proxies with per-domain allowlists, one n8n per domain, a policy gateway (Envoy + OPA) as the only path from agents to their tools, a CalDAV/IMAP-only exit for the private domain, and the git gateway for `auto-improve/*` PRs. Live network tests run in Docker. See [`docs/runbooks/isolation-services.md`](docs/runbooks/isolation-services.md).
 - Phase 5 (private domain), implemented: calendar and mail sync, mail triage, a daily briefing and reply drafts, all on local models with Tier 0b checks and a local supervisor. The assistant container reaches only your CalDAV and IMAP hosts and Ollama; drafts are never sent. See [`docs/runbooks/private-domain.md`](docs/runbooks/private-domain.md).
+- Phase 6 (trading, paper only), implemented: broker-independent `BrokerAdapter` with a paper broker, a non-LLM risk engine (allowlist, notional and exposure limits, order frequency, daily loss, drawdown), a fail-closed kill switch, and backtests on the same order path. No broker account is connected. See [`docs/runbooks/trading-paper.md`](docs/runbooks/trading-paper.md).
 
 ## Quick start
 
