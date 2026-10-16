@@ -77,6 +77,8 @@ buy_and_hold          10.96%    4.93%    5.81%    0.60   11.18%
 
 (Synthetic data from `tests/trading/test_trend_vol.py`: three years with a crash. Figures are on the whole account, so with 2400 of 10 000 invested they are smaller than the instrument's own.) Bar frequency is inferred: 252 bars a year for daily bars, more for intraday. Expect the strategy to lag buy-and-hold in steady bull markets and to win on drawdown in crashes; that trade-off is the point of a baseline. It is paper only: the executor refuses any broker but the paper broker.
 
+`--sweep` runs the same backtest over trend lengths 100 to 250 and volatility targets 8 to 15 %, marks the current settings with `*` and runs that hit a risk limit with `!`. Use it as a robustness check: a setting is only credible when its neighbours do about as well, not because it is the best row.
+
 Daily bars: any CSV in the format above works, for example an export of SPY's daily history. The live feed records 1-minute bars under `<data-dir>/bars/` for intraday backtests.
 
 ## Live market data

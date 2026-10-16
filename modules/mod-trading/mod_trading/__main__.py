@@ -95,7 +95,50 @@ def print_report(report: SessionReport) -> None:
     )
 
 
+SWEEP_TRENDS = (100, 150, 200, 250)
+SWEEP_TARGET_VOLS = (0.08, 0.10, 0.15)
+
+
+def sweep(args: argparse.Namespace) -> int:
+    """The trend-vol baseline over a small parameter grid, next to buy-and-hold.
+
+    A robustness check, not an optimiser: a setting is only credible when its neighbours do
+    about as well. Every run is a fresh in-memory backtest through the same risk limits.
+    """
+    bars = read_bars(args.bars)
+    per_year = bars_per_year(bars)
+    rows: dict[str, Performance] = {}
+    for trend in SWEEP_TRENDS:
+        for target_vol in SWEEP_TARGET_VOLS:
+            if trend <= args.vol_window:
+                continue
+            run = argparse.Namespace(**{**vars(args), "trend": trend, "target_vol": target_vol})
+            clock = SimClock()
+            built = _executor(run, clock, persistent=False, bar_frequency=per_year)
+            assert built is not None  # in-memory runs start with the switch released
+            executor, strategy = built
+            report = run_session(
+                replay(bars, args.spread_bps), strategy, executor, claims, clock.set
+            )
+            if len(report.equity) < 2:
+                continue
+            refused = sum(report.violations.values())
+            mark = "*" if (trend, target_vol) == (args.trend, args.target_vol) else " "
+            name = f"{mark}{trend}/{target_vol:.2f}{'!' if refused else ''}"
+            rows[name] = performance(report.equity, per_year)
+    mine = [b for b in bars if b.instrument == args.instrument]
+    cost = args.spread_bps / 2 + Decimal(15)
+    held = buy_and_hold(mine, cash=args.cash, capital=args.capital, cost_bps=cost)
+    if len(held) >= 2:
+        rows["buy_and_hold"] = performance(held, per_year)
+    print("trend/target_vol; * = current settings, ! = some orders refused by the risk limits")
+    print_comparison(rows)
+    return 0
+
+
 def session(args: argparse.Namespace, *, persistent: bool) -> int:
+    if getattr(args, "sweep", False):
+        return sweep(args)
     clock = SimClock()
     bars = read_bars(args.bars)
     built = _executor(args, clock, persistent=persistent, bar_frequency=bars_per_year(bars))
@@ -291,6 +334,11 @@ def main(argv: list[str] | None = None) -> int:
         if name == "backtest":
             run.add_argument(
                 "--compare", action="store_true", help="compare with buy-and-hold of --capital"
+            )
+            run.add_argument(
+                "--sweep",
+                action="store_true",
+                help="trend-vol over a grid of --trend and --target-vol, with buy-and-hold",
             )
         run.add_argument("--fast", type=int, default=10)
         run.add_argument("--slow", type=int, default=30)
