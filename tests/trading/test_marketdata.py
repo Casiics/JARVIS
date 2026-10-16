@@ -7,6 +7,7 @@ is never traded, and history only primes the strategy.
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +26,7 @@ from mod_trading.marketdata import (
     parse_chart,
 )
 from mod_trading.schemas import Bar
+from trading_risk import KillSwitch
 
 OPEN = datetime(2026, 10, 16, 13, 30, tzinfo=UTC)  # 09:30 New York
 
@@ -253,3 +255,26 @@ def test_paper_live_polls_once(
     out = capsys.readouterr().out
     # The first poll is history only; nothing new arrived within the same poll.
     assert "SPY: 40 bars of history" in out and "bars 0, intents 0" in out
+
+
+def test_service_mode_waits_for_the_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Empty:
+        def __init__(self, url: str) -> None:
+            pass
+
+        def bars(self, symbol: str, now: datetime) -> list[Bar]:
+            return []
+
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        KillSwitch(tmp_path / "killswitch").release()  # a human, some time later
+
+    monkeypatch.setattr(cli, "McpBarSource", Empty)
+    monkeypatch.setattr(time, "sleep", sleep)
+    args = ["--data-dir", str(tmp_path), "paper-live", "--instrument", "SPY", "--once"]
+    assert cli.main([*args, "--wait-for-release"]) == 0
+    assert slept and "waiting for a human" in capsys.readouterr().out

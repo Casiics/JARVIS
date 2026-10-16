@@ -108,20 +108,26 @@ docker compose -f docker/docker-compose.yml up -d n8n-trading opa-trading mcp-ga
 docker compose -f docker/docker-compose.yml restart opa-trading egress-trading
 ```
 
-### Run
+### Run as a service
 
-`paper-live` must run where `mcp-gateway-trading` resolves, which is `net-trading`. It polls every 60 s (`--poll-s`); `--once` polls a single time, which is the quickest check that data arrives.
+`trading-paper` runs `paper-live` around the clock on `net-trading`, with the baseline strategy on SPY by default (`JARVIS_PAPER_INSTRUMENT`, `JARVIS_PAPER_STRATEGY`). It sits behind the `paper` profile, so a plain `up -d` never starts trading.
 
 ```bash
-python -m mod_trading --data-dir /var/lib/jarvis/trading kill-switch release
-python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument SPY
+docker compose -f docker/docker-compose.yml --profile paper build trading-paper
+docker compose -f docker/docker-compose.yml --profile paper up -d trading-paper
+# The kill switch starts engaged; the service waits until you release it:
+docker compose -f docker/docker-compose.yml --profile paper run --rm trading-paper kill-switch release
+docker compose -f docker/docker-compose.yml --profile paper run --rm trading-paper status
+docker compose -f docker/docker-compose.yml logs -f trading-paper
 ```
 
-Messages starting with `market data:` mean a poll brought nothing usable; the session keeps polling and trades nothing on that poll. `tests/isolation/test_trading_marketdata_live.py` (`JARVIS_TEST_DOCKER=1`) runs the committed workflow in a real n8n behind the gateway.
+It polls every 60 s; outside US market hours no new bars arrive and nothing trades. A one-off check that data arrives: `run --rm trading-paper paper-live --instrument SPY --once`. Messages starting with `market data:` mean a poll brought nothing usable; the session keeps polling and trades nothing on that poll. Account, kill switch, audit chain and recorded bars live in the `trading_paper_data` volume.
+
+`tests/isolation/test_trading_marketdata_live.py` (`JARVIS_TEST_DOCKER=1`) runs the committed workflow in a real n8n behind the gateway and the service image against it.
 
 ## Exit criterion and what is missing for it
 
 The roadmap asks for several weeks of paper trading without a risk-limit violation before a live key exists. The path is complete and tested (`tests/trading/`), and live bars arrive through n8n-trading. For a continuous paper run it still needs:
 
-- **A service.** A `trading-paper` container on `net-trading` (no egress) that runs `paper-live` and restarts with the stack. It changes `docker/`, a protected path.
+- **Time.** Several weeks of the `trading-paper` service without a risk-limit violation (`status`, and the audit chain in its volume).
 - **Deck integration.** The kill switch and daily P&L in the deck's top bar arrive with the orchestrator service that connects domains to the API gateway.

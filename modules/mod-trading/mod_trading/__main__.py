@@ -25,6 +25,7 @@ import os
 import secrets
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -134,6 +135,15 @@ def live(args: argparse.Namespace) -> int:
     def wall() -> datetime:
         return datetime.now(UTC)
 
+    if args.wait_for_release:
+        switch = KillSwitch(args.data_dir / "killswitch")
+        if switch.engaged():
+            print("kill switch engaged; waiting for a human to release it", flush=True)
+        while switch.engaged():
+            try:
+                time.sleep(args.poll_s)
+            except KeyboardInterrupt:
+                return 3
     built = _executor(args, wall, persistent=True)
     if built is None:
         return 3
@@ -244,6 +254,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             run.add_argument("--poll-s", type=float, default=60.0)
             run.add_argument("--once", action="store_true", help="poll once, then stop")
+            run.add_argument(
+                "--wait-for-release",
+                action="store_true",
+                help="while the kill switch is engaged, wait instead of exiting (service mode)",
+            )
         else:
             run.add_argument("--bars", type=Path, required=True)
         run.add_argument("--instrument", required=True)
