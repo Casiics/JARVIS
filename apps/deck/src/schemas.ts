@@ -46,6 +46,8 @@ export type ApprovalSummary = z.infer<typeof ApprovalSummary>;
 export const Attention = z.strictObject({
   approvals: z.array(ApprovalSummary),
   count: z.number().int().nonnegative(),
+  // Open curation reviews on the Content page (core/jarvis_core/api/context_reviews.py).
+  context_reviews: z.number().int().nonnegative(),
 });
 export type Attention = z.infer<typeof Attention>;
 

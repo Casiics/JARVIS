@@ -57,7 +57,7 @@ describe("approvals", () => {
   };
 
   it("parses the attention queue", () => {
-    expect(Attention.parse({ approvals: [summary], count: 1 }).count).toBe(1);
+    expect(Attention.parse({ approvals: [summary], count: 1, context_reviews: 0 }).count).toBe(1);
   });
 
   it("accepts private approvals without content", () => {
@@ -73,7 +73,7 @@ describe("approvals", () => {
 
   it("rejects unexpected fields", () => {
     expect(
-      Attention.safeParse({ approvals: [{ ...summary, raw: "x" }], count: 1 })
+      Attention.safeParse({ approvals: [{ ...summary, raw: "x" }], count: 1, context_reviews: 0 })
         .success,
     ).toBe(false);
   });
