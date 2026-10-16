@@ -35,7 +35,11 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["core/jarvis_core", "modules/mod-content/mod_content"]
+packages = [
+    "core/jarvis_core",
+    "modules/mod-content/mod_content",
+    "modules/mod-private/mod_private",
+]
 
 [tool.ruff]
 line-length = 100
@@ -52,8 +56,8 @@ known-first-party = ["jarvis_core", "mod_content"]
 strict = true
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-mypy_path = ["core", "modules/mod-content"]
-packages = ["jarvis_core", "mod_content"]
+mypy_path = ["core", "modules/mod-content", "modules/mod-private"]
+packages = ["jarvis_core", "mod_content", "mod_private"]
 exclude = ["modules/mod-content/sandbox/"]
 
 [tool.pytest.ini_options]

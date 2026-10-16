@@ -1,0 +1,8 @@
+# Runtime dependencies of the private-assistant image, pinned to uv.lock.
+# Installed with --no-deps so nothing outside this list lands in the image.
+annotated-types==0.8.0
+pydantic==2.14.1
+pydantic-core==2.50.1
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+tzdata==2026.5

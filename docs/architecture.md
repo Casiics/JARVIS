@@ -217,7 +217,9 @@ The full concept, including the threat model, lives in the project's Zero-Trust 
 | `net-content` | Content Hermes, `pg-content`, `qdrant-content`, `mcp-gateway-content` | None |
 | `net-private` | Private Hermes, `pg-private`, `qdrant-private`, `redis-private`, `mcp-gateway-private` | None |
 | `net-mcp-<domain>` | The domain's n8n, OPA, policy gateway and egress proxy | Per-domain allowlist via `egress-<domain>`; private: CalDAV and IMAP only via `egress-private` |
+| `net-private-assistant` | `private-assistant`, `egress-private` | CalDAV and IMAP only via `egress-private` |
 | `net-inference` | Ollama | None |
+| `net-inference-private` | `private-assistant`, Ollama | None |
 | `jarvis-sandbox-egress` | Reel fetch sandboxes, `egress-reel` | Instagram hosts via `egress-reel` |
 | `net-sandbox-<id>` | One sandbox run | Per run, default none |
 | `net-egress` | `egress-*` proxies only | Internet |
@@ -285,8 +287,8 @@ Each phase ends with an exit criterion that must hold before the next starts.
    Exit: a tier C action can only be approved via the deck (`tests/api/test_deck_approvals.py`).
 4. **Isolation services**: one n8n instance per domain, policy gateway (OPA behind Envoy) in front of all MCP servers, egress proxy with per-domain allowlists, git gateway (implemented in `docker/`, `policies/` and `core/jarvis_core/gitgateway/`; runbook: [`runbooks/isolation-services.md`](runbooks/isolation-services.md)).
    Exit: live network tests in Docker show that agents have no route out and reach tools only through the policy gateway, that each egress proxy allows only its allowlist, and that the git gateway refuses protected paths (`tests/isolation/`, `tests/gitgateway/`).
-5. **Private domain** with local supervisor.
-   Exit: a network test shows `net-private` reaches only CalDAV and IMAP.
+5. **Private domain** with local supervisor (implemented in `modules/mod-private/`; runbook: [`runbooks/private-domain.md`](runbooks/private-domain.md)): calendar and mail sync, triage, daily briefing and reply drafts on local models, in a container that reaches only CalDAV, IMAP and Ollama.
+   Exit: a network test shows the private domain reaches only CalDAV and IMAP (`tests/isolation/test_private_live.py`, `test_isolation_live.py`).
 6. **Trading domain** with `BrokerAdapter`, risk gate and kill switch; paper/testnet only.
    Exit: several weeks of paper trading without risk-limit violations before a live key exists.
 7. **Self-improvement** and operations hardening (SPIRE, WORM export, chain signatures).

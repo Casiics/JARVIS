@@ -32,11 +32,12 @@ EXPECTED_NETWORKS = {
     "pg-private": {"net-private"},
     "qdrant-private": {"net-private"},
     "redis-private": {"net-private"},
-    "egress-private": {"net-mcp-private", "net-egress"},
+    "egress-private": {"net-mcp-private", "net-private-assistant", "net-egress"},
     "n8n-private": {"net-mcp-private"},
     "opa-private": {"net-mcp-private"},
     "mcp-gateway-private": {"net-private", "net-mcp-private"},
-    "ollama": {"net-inference"},
+    "private-assistant": {"net-private-assistant", "net-inference-private"},
+    "ollama": {"net-inference", "net-inference-private"},
 }
 
 DOMAIN_OF_NETWORK = {
@@ -48,11 +49,15 @@ DOMAIN_OF_NETWORK = {
     "net-sandbox-egress": "content",
     "net-private": "private",
     "net-mcp-private": "private",
+    "net-private-assistant": "private",
+    "net-inference-private": "private",
 }
 
 # Isolation services added in Phase 4 run with a read-only root and no capabilities.
 HARDENED = [
-    s for s in EXPECTED_NETWORKS if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-"))
+    s
+    for s in EXPECTED_NETWORKS
+    if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-")) or s == "private-assistant"
 ]
 
 
@@ -184,3 +189,32 @@ def test_no_plaintext_passwords_in_environment(compose: dict[str, Any]) -> None:
             if "PASSWORD" in key or "KEY" in key:
                 assert key.endswith("_FILE"), f"{name}.{key} must reference a secret file"
                 assert str(value).startswith("/run/secrets/")
+
+
+def test_private_assistant_reaches_only_its_stream_proxy_and_ollama(
+    compose: dict[str, Any],
+) -> None:
+    service = compose["services"]["private-assistant"]
+    proxy = compose["services"]["egress-private"]["networks"]["net-private-assistant"]
+    assert "HTTPS_PROXY" not in service["environment"]
+    assert service["extra_hosts"]
+    assert all(entry.endswith(f":{proxy['ipv4_address']}") for entry in service["extra_hosts"])
+    assert service["environment"]["JARVIS_OLLAMA_URL"] == "http://ollama:11434"
+    on_inference = {
+        n for n, s in compose["services"].items() if "net-inference-private" in networks_of(s)
+    }
+    assert on_inference == {"private-assistant", "ollama"}
+    on_assistant_net = {
+        n for n, s in compose["services"].items() if "net-private-assistant" in networks_of(s)
+    }
+    assert on_assistant_net == {"private-assistant", "egress-private"}
+
+
+def test_private_assistant_reads_secrets_where_the_provider_looks(
+    compose: dict[str, Any],
+) -> None:
+    service = compose["services"]["private-assistant"]
+    assert service["profiles"] == ["tools"], "one-shot command, never started by `up`"
+    for secret in service["secrets"]:
+        key = secret["source"].removeprefix("private_")
+        assert secret["target"] == f"/run/jarvis/secrets/private/{key}"

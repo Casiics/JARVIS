@@ -8,7 +8,7 @@ Phase 4 puts a checkpoint on every way out of a domain. Agents get no network ro
 |---|---|---|
 | `egress-core`, `egress-trading`, `egress-content` | domain side + `net-egress` | Squid. HTTPS (`CONNECT` to 443) to the host names in `policies/egress/<domain>.allow`, nothing else |
 | `egress-reel` | `jarvis-sandbox-egress` + `net-egress` | Squid for the reel fetch sandbox, `policies/egress/reel.allow` (Instagram only) |
-| `egress-private` | `net-mcp-private` + `net-egress` | nginx TLS passthrough to exactly one CalDAV host (443) and one IMAP host (993). No SMTP |
+| `egress-private` | `net-mcp-private` + `net-private-assistant` + `net-egress` | nginx TLS passthrough to exactly one CalDAV host (443) and one IMAP host (993). No SMTP. Serves `n8n-private` and the private assistant ([`private-domain.md`](private-domain.md)) |
 | `n8n-trading`, `n8n-content`, `n8n-private` | `net-mcp-<domain>` | One n8n per domain with its own encryption key; MCP Server Trigger workflows are the domain's tools |
 | `opa-<domain>` | `net-mcp-<domain>` | Decides every MCP request with `policies/mcp/authz.rego` and only its own domain's `policies/mcp-tools/<domain>.json` |
 | `mcp-gateway-<domain>` | `net-<domain>` + `net-mcp-<domain>` | Envoy. The only bridge between agents and their n8n. Asks OPA first and fails closed |
@@ -27,7 +27,7 @@ sudo -E scripts/secrets-unpack.sh
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-`10.213.40.0/24` is reserved for `net-mcp-private` (the private proxy sits at `.2`). If it collides with your LAN, change both places in `docker/docker-compose.yml`.
+`10.213.40.0/24` is reserved for `net-mcp-private` and `10.213.41.0/24` for `net-private-assistant` (the private proxy sits at `.2` in both). If one collides with your LAN, change the subnet and every address that points at the proxy in `docker/docker-compose.yml`.
 
 ## Building workflows in n8n
 

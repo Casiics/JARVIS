@@ -1,0 +1,14 @@
+# Build contexts get source code only.
+**/.venv
+**/node_modules
+**/__pycache__
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/.turbo
+**/dist
+.git
+secrets
+*.key
+.env
+.env.*

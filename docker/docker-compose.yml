@@ -302,7 +302,8 @@ services:
       - { source: private_redis_password, target: redis_password }
 
   # CalDAV and IMAP only, as a TLS passthrough (docker/egress-private/nginx.conf.template).
-  # n8n-private resolves the two host names to this proxy's fixed address.
+  # n8n-private and private-assistant resolve the two host names to this proxy's fixed address
+  # on their own network, so neither shares a network with the other.
   egress-private:
     image: nginx:1.28.0-alpine
     restart: unless-stopped
@@ -314,6 +315,7 @@ services:
       net.ipv4.ip_unprivileged_port_start: "0"
     networks:
       net-mcp-private: { ipv4_address: 10.213.40.2 }
+      net-private-assistant: { ipv4_address: 10.213.41.2 }
       net-egress: {}
     environment:
       JARVIS_CALDAV_HOST: ${JARVIS_CALDAV_HOST:-caldav.invalid}
@@ -355,14 +357,50 @@ services:
     networks: [net-private, net-mcp-private]
     depends_on: [opa-private]
 
+  # Phase 5 assistant: calendar and mail sync, triage, briefing and reply drafts, all on local
+  # models. One-shot (`docker compose run --rm private-assistant daily`), so it sits behind a
+  # profile. It reaches only Ollama (net-inference-private) and the CalDAV and IMAP hosts through
+  # egress-private. It does not join net-mcp-private, so it cannot reach n8n-private around the
+  # policy gateway, and it has no route to any other domain or to the internet.
+  private-assistant:
+    image: localhost/jarvis-private:0.1.0
+    build:
+      context: ..
+      dockerfile: modules/mod-private/Dockerfile
+    profiles: [tools]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-private-assistant, net-inference-private]
+    extra_hosts:
+      - "${JARVIS_CALDAV_HOST:-caldav.invalid}:10.213.41.2"
+      - "${JARVIS_IMAP_HOST:-imap.invalid}:10.213.41.2"
+    environment:
+      JARVIS_CALDAV_URL: ${JARVIS_CALDAV_URL:-}
+      JARVIS_IMAP_HOST: ${JARVIS_IMAP_HOST:-}
+      JARVIS_IMAP_PORT: "993"
+      JARVIS_OWNER_ADDRESS: ${JARVIS_OWNER_ADDRESS:-}
+      JARVIS_TZ: ${JARVIS_TZ:-Europe/Berlin}
+      JARVIS_OLLAMA_URL: http://ollama:11434
+    tmpfs: [/tmp]
+    volumes:
+      - private_assistant_data:/var/lib/jarvis/private
+    secrets:
+      - { source: private_caldav_username, target: /run/jarvis/secrets/private/caldav_username }
+      - { source: private_caldav_password, target: /run/jarvis/secrets/private/caldav_password }
+      - { source: private_imap_username, target: /run/jarvis/secrets/private/imap_username }
+      - { source: private_imap_password, target: /run/jarvis/secrets/private/imap_password }
+
   # --- inference ------------------------------------------------------------------------------
   # One GPU (RTX 4070 Ti, 12 GB): one Ollama instance, one model loaded at a time.
-  # Reachable only by the model router (joins net-inference in a later phase), never by agents.
+  # Reached by model routers only: the private assistant's router over net-inference-private,
+  # the other domains' routers over net-inference once their services run. Never by agents.
   ollama:
     image: ollama/ollama:0.11.4
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
-    networks: [net-inference]
+    networks: [net-inference, net-inference-private]
     environment:
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_NUM_PARALLEL: "1"
@@ -383,6 +421,8 @@ networks:
   net-content: { internal: true }
   net-private: { internal: true }
   net-inference: { internal: true }
+  # Private domain to Ollama only, so private traffic never shares a network with other domains.
+  net-inference-private: { internal: true }
   net-mcp-trading: { internal: true }
   net-mcp-content: { internal: true }
   net-mcp-private:
@@ -392,6 +432,13 @@ networks:
         - subnet: 10.213.40.0/24
           # Dynamic addresses come from the upper half; egress-private keeps 10.213.40.2.
           ip_range: 10.213.40.128/25
+  # private-assistant to egress-private (fixed at 10.213.41.2), nothing else.
+  net-private-assistant:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.213.41.0/24
+          ip_range: 10.213.41.128/25
   # Fixed name: the sandbox runner starts reel fetch containers on it (EngineConfig).
   net-sandbox-egress: { internal: true, name: jarvis-sandbox-egress }
   # The only network with a route out. Members: egress-* proxies, nothing else.
@@ -411,6 +458,7 @@ volumes:
   n8n_trading_data:
   n8n_content_data:
   n8n_private_data:
+  private_assistant_data:
 
 secrets:
   core_pg_audit_superuser_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/core/pg_audit_superuser_password" }
@@ -435,3 +483,7 @@ secrets:
   private_pg_agent_ro_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/pg_agent_ro_password" }
   private_qdrant_api_key: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/qdrant_api_key" }
   private_redis_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/redis_password" }
+  private_caldav_username: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/caldav_username" }
+  private_caldav_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/caldav_password" }
+  private_imap_username: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/imap_username" }
+  private_imap_password: { file: "${JARVIS_SECRETS_DIR:-/run/jarvis/secrets}/private/imap_password" }

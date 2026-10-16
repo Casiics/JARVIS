@@ -4,6 +4,7 @@ Each command prints one JSON object:
     tcp HOST PORT                          {"ok": bool, "error": str}
     connect PROXY_HOST PROXY_PORT HOST PORT  {"status": int}  (HTTP CONNECT through a proxy)
     tls HOST PORT SNI                      {"ok": bool, "banner": str, "error": str}
+                                           (ok after the handshake; banner if the server talks)
     http METHOD URL [JSON]                 {"status": int, "body": str}
     mcp URL METHOD PARAMS_JSON             {"status": int, "body": str}  (after an MCP handshake)
 
@@ -43,7 +44,11 @@ def tls(host: str, port: int, sni: str) -> dict[str, Any]:
     try:
         with socket.create_connection((host, port), timeout=5) as raw:
             with context.wrap_socket(raw, server_hostname=sni) as conn:
-                banner = conn.recv(256).decode().strip()
+                conn.settimeout(2)
+                try:
+                    banner = conn.recv(256).decode().strip()
+                except TimeoutError:
+                    banner = ""  # handshake done; server waits for the client (HTTP)
     except (OSError, ssl.SSLError) as exc:
         return {"ok": False, "banner": "", "error": type(exc).__name__}
     return {"ok": True, "banner": banner, "error": ""}
