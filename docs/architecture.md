@@ -140,6 +140,7 @@ Missing or unknown labels are treated as `PRIVATE`. Anything originating in the 
 | Core → any domain | Yes | Signed task token |
 | Core → content | Yes | `ReelSubmitted` (canonical reel link and task id) when the owner submits a reel in the deck; content reports back with `TaskMetadata` only |
 | Any domain → core | Yes | Result object, audit entry, metadata-only telemetry |
+| Content ↔ core (deck review) | Yes, PUBLIC/INTERNAL only | `ContextReviewRequested` (bounded summary of an uncertain curation decision) to the deck; the owner's `ContextReviewDecided` goes back and content applies it to its own store. Own mailbox root `context-review/` |
 | Content → trading | As proposal | `TradingIdeaProposed` into the trading inbox |
 | Content → private | As proposal | `LifeTipProposed` into the private inbox |
 | Private → anywhere except core metadata | No | Only by single, step-up approved exception |
@@ -173,7 +174,7 @@ What enters a domain's long-term context passes four deterministic stages (`jarv
 3. **Prepare**: the digest gets a category from the domain's YAML configuration, is compared with that category's stored entries and receives a `DecisionBrief`: store, merge or discard, with confidence and reasons.
 4. **Decide**: plain code applies the brief. Confident proposals are stored or merged automatically, weak ones discarded; flagged, over-classified or uncertain ones wait for the owner's review.
 
-No stage calls a model. Every stage writes ids and hashes to the audit chain. Curated entries stay in the domain's own store; nothing is shared across domains. See `docs/runbooks/context-curation.md`.
+No stage calls a model. Every stage writes ids and hashes to the audit chain. Open reviews can be decided in the deck (section 5.3); material above INTERNAL stays a terminal review. Curated entries stay in the domain's own store; nothing is shared across domains. See `docs/runbooks/context-curation.md`.
 
 ### 6.3 Trading idea to order
 

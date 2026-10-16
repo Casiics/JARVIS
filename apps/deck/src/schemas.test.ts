@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ApprovalDetail, Attention, TelemetryEvent } from "./schemas";
+import {
+  ApprovalDetail,
+  Attention,
+  ContextReviewList,
+  TelemetryEvent,
+} from "./schemas";
 import { mergeEvent, parseTelemetry } from "./telemetry";
 
 // Shapes as the Python gateway serialises them.
@@ -21,8 +26,12 @@ describe("telemetry", () => {
   });
 
   it("drops events that carry content or unknown fields", () => {
-    expect(parseTelemetry(JSON.stringify({ ...event, prompt: "secret" }))).toBeNull();
-    expect(parseTelemetry(JSON.stringify({ ...event, node: "free text" }))).toBeNull();
+    expect(
+      parseTelemetry(JSON.stringify({ ...event, prompt: "secret" })),
+    ).toBeNull();
+    expect(
+      parseTelemetry(JSON.stringify({ ...event, node: "free text" })),
+    ).toBeNull();
     expect(parseTelemetry("not json")).toBeNull();
     expect(parseTelemetry(42)).toBeNull();
   });
@@ -63,6 +72,48 @@ describe("approvals", () => {
   });
 
   it("rejects unexpected fields", () => {
-    expect(Attention.safeParse({ approvals: [{ ...summary, raw: "x" }], count: 1 }).success).toBe(false);
+    expect(
+      Attention.safeParse({ approvals: [{ ...summary, raw: "x" }], count: 1 })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("context reviews", () => {
+  const review = {
+    brief_id: "br:0123456789abcdef01234567",
+    category: "market-notes",
+    proposal: "store",
+    confidence: 0.67,
+    title: "A QQQ opening range breakout",
+    summary: "Waits for the first 15 minutes.",
+    facts: ["Wait 15 minutes"],
+    reasons: ["category market-notes"],
+    flags: [],
+    source_refs: ["https://www.instagram.com/reel/ABCDE12345/"],
+    received_at: "2026-10-16T12:00:00+00:00",
+    decided_at: null,
+    accepted: null,
+  };
+
+  it("parses the gateway listing", () => {
+    expect(
+      ContextReviewList.parse({ open: [review], recent: [] }).open[0]?.category,
+    ).toBe("market-notes");
+  });
+
+  it("rejects malformed ids and extra fields", () => {
+    expect(
+      ContextReviewList.safeParse({
+        open: [{ ...review, brief_id: "x" }],
+        recent: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      ContextReviewList.safeParse({
+        open: [{ ...review, html: "<b>" }],
+        recent: [],
+      }).success,
+    ).toBe(false);
   });
 });

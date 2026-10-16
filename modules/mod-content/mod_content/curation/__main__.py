@@ -26,6 +26,7 @@ from jarvis_core.curation.config import load_config
 from jarvis_core.curation.models import Outcome
 from jarvis_core.curation.pipeline import CurationPipeline, ReviewNotFound
 from jarvis_core.curation.store import FileCurationStore, open_reviews
+from mod_content.curation.deck import DeckReviews, review_mailbox
 from mod_content.curation.sources import reel_items
 from mod_content.reel.store import FileAuditStore
 
@@ -43,6 +44,11 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="collect, consolidate, prepare and decide")
     run.add_argument("--watch", action="store_true", help="keep running as new reels arrive")
     run.add_argument("--poll-seconds", type=float, default=30.0)
+    run.add_argument(
+        "--boundary-dir",
+        type=Path,
+        help="send open reviews to the deck and apply its answers (same as the gateway's)",
+    )
 
     sub.add_parser("review", help="list decisions waiting for you")
     decide = sub.add_parser("decide", help="accept or reject an open review")
@@ -73,10 +79,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "decide":
         return _decide(pipeline, store, args.brief_id, args.verdict == "accept", args.note)
+    deck = (
+        DeckReviews(pipeline, store, review_mailbox(args.boundary_dir), root / "deck-sent.json")
+        if args.boundary_dir
+        else None
+    )
     while True:
         counts = pipeline.run(reel_items(data / "runs.jsonl"))
         if counts.collected or counts.rejected or not args.watch:
             print(counts.model_dump_json(), flush=True)
+        if deck is not None:
+            synced = deck.sync()
+            if synced.sent or synced.applied or synced.not_sendable:
+                print(json.dumps({"deck": synced.__dict__}), flush=True)
         if not args.watch:
             return 0
         time.sleep(args.poll_seconds)

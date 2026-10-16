@@ -34,6 +34,22 @@ A brief waits for review when it carries injection flags, when its classificatio
 what the category allows, or when its confidence is between `auto_discard_below` and
 `auto_store_at`. A unique prefix of the id is enough.
 
+## Review in the deck
+
+Start curation with the gateway's boundary directory and the open reviews appear on the deck's
+Content page under "Kontext-Freigaben":
+
+```bash
+uv run python -m mod_content.curation --data-dir ~/jarvis-data/content run --watch \
+  --boundary-dir ~/.local/share/jarvis-deck-local/boundary
+```
+
+Each pass first applies the answers given in the deck, then sends reviews the deck has not seen.
+Reviews use their own mailbox (`<boundary>/context-review/`), so they never compete with the
+reel worker for letters. Only PUBLIC or INTERNAL material is sent; anything stricter stays a
+terminal review. If you decide a review in the terminal first, the deck's later answer is
+ignored.
+
 ## Look at the result
 
 ```bash
