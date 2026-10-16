@@ -102,3 +102,20 @@ def test_get_bars_runs_in_n8n(stack: Stack) -> None:
 def test_other_tools_never_reach_n8n(stack: Stack) -> None:
     response = _call(stack, "tools/call", {"name": "place_order", "arguments": {}})
     assert response["status"] == 403
+
+
+def test_paper_service_reaches_market_data_only_through_the_gateway(stack: Stack) -> None:
+    paper = ["--profile", "paper"]
+    build = stack.compose(*paper, "build", "trading-paper", timeout=900)
+    assert build.returncode == 0, build.stderr[-2000:]
+    release = stack.compose(*paper, "run", "--rm", "trading-paper", "kill-switch", "release")
+    assert release.returncode == 0, release.stderr[-2000:]
+    run = stack.compose(
+        *paper, "run", "--rm", "trading-paper", "paper-live", "--instrument", "SPY", "--once"
+    )
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert "SPY:" in run.stdout and "kill switch trips 0" in run.stdout
+    # The MCP round trip worked; whether the provider sent bars depends on the network and the
+    # time of day, and an empty or refused answer is reported, never traded.
+    assert "gateway unreachable" not in run.stderr
+    assert "answered HTTP" not in run.stderr

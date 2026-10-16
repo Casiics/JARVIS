@@ -192,6 +192,35 @@ services:
     networks: [net-trading, net-mcp-trading]
     depends_on: [opa-trading]
 
+  # Paper trading on live 1-minute bars (docs/runbooks/trading-paper.md). Opt in with
+  # `--profile paper`. Only on net-trading: it reaches market data through mcp-gateway-trading
+  # and has no route to n8n, the internet or another domain. Paper only, no broker key. The
+  # kill switch starts engaged; the service waits until a human releases it with
+  # `docker compose run --rm trading-paper kill-switch release`.
+  trading-paper:
+    image: localhost/jarvis-trading:0.1.0
+    build:
+      context: ..
+      dockerfile: modules/mod-trading/Dockerfile
+    profiles: [paper]
+    restart: unless-stopped
+    user: "10003:10003"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [net-trading]
+    depends_on: [mcp-gateway-trading]
+    environment:
+      JARVIS_TZ: ${JARVIS_TZ:-Europe/Berlin}
+    command:
+      - paper-live
+      - --instrument=${JARVIS_PAPER_INSTRUMENT:-SPY}
+      - --strategy=${JARVIS_PAPER_STRATEGY:-trend-vol}
+      - --wait-for-release
+    tmpfs: [/tmp]
+    volumes:
+      - trading_paper_data:/var/lib/jarvis/trading
+
   # --- content --------------------------------------------------------------------------------
   pg-content:
     <<: *postgres
@@ -544,6 +573,7 @@ volumes:
   n8n_content_data:
   n8n_private_data:
   private_assistant_data:
+  trading_paper_data:
   audit_worm:
   pki_ca_data:
   certs_core:
