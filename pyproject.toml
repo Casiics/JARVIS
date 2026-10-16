@@ -10,6 +10,8 @@ dependencies = [
 
 [project.optional-dependencies]
 db = ["psycopg[binary]>=3.2,<4"]
+# API gateway for the command deck (core, net-gateway). Domain workers do not need it.
+gateway = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "websockets>=15,<17", "webauthn>=3.0,<4"]
 
 [dependency-groups]
 dev = [
@@ -18,6 +20,11 @@ dev = [
     "ruff>=0.8",
     "types-PyYAML>=6.0",
     "psycopg[binary]>=3.2,<4",
+    "httpx>=0.28",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.32,<1",
+    "websockets>=15,<17",
+    "webauthn>=3.0,<4",
 ]
 
 [build-system]

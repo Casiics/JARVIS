@@ -276,8 +276,8 @@ Each phase ends with an exit criterion that must hold before the next starts.
    Exit: tests prove that no private-domain or `PRIVATE` request reaches a cloud endpoint, that each data service sits only in its own domain network with only its own secrets, and that the audit log is append-only.
 2. **First vertical slice: reel pipeline** in the content domain with quarantine worker, sandbox and local models (implemented in `modules/mod-content/`; runbook: [`runbooks/reel-pipeline.md`](runbooks/reel-pipeline.md)). Model calls go through the inference gateway (`core/jarvis_core/router/gateway.py`), which combines routing policy, circuit breaker and audit.
    Exit: 20 real reels processed, cost and audit visible (`python -m mod_content.reel report`). Open: needs a run on the workstation GPU.
-3. **Dashboard skeleton** and API gateway with passkey login.
-   Exit: a tier C action can only be approved via the deck.
+3. **Dashboard skeleton** and API gateway with passkey login (implemented in `apps/deck/` and `core/jarvis_core/api/`; runbook: [`runbooks/command-deck.md`](runbooks/command-deck.md)). Approvals are passkey ceremonies bound to one request and one decision; executors accept only the resulting single-use grant (`core/jarvis_core/approvals/`).
+   Exit: a tier C action can only be approved via the deck (`tests/api/test_deck_approvals.py`).
 4. **Isolation services**: one n8n instance per domain, policy gateway (OPA behind Envoy) in front of all MCP servers, egress proxy with per-domain allowlists, git gateway.
 5. **Private domain** with local supervisor.
    Exit: a network test shows `net-private` reaches only CalDAV and IMAP.
