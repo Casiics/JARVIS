@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -121,6 +122,8 @@ class EngineConfig:
     egress_network: str = "jarvis-sandbox-egress"
     egress_proxy: str | None = "http://egress-reel:3128"
     user: str = "65534:65534"
+    # Print the tail of a failed step's stderr to this terminal (never to records or core).
+    show_errors: bool = False
 
 
 def build_command(spec: SandboxSpec, name: str, config: EngineConfig) -> list[str]:
@@ -203,6 +206,10 @@ class SubprocessSandboxRunner:
                 [self._config.engine, "kill", name], capture_output=True, check=False
             )
             exit_code, stderr, timed_out = -1, exc.stderr or b"", True
+        if self._config.show_errors and (exit_code != 0 or timed_out):
+            tail = stderr[-3000:].decode("utf-8", "replace")
+            print(f"--- {spec.step} failed (exit {exit_code}), stderr tail ---", file=sys.stderr)
+            print(tail, file=sys.stderr, flush=True)
         return SandboxResult(
             step=spec.step,
             exit_code=exit_code,
@@ -210,3 +217,48 @@ class SubprocessSandboxRunner:
             timed_out=timed_out,
             stderr_sha256=hashlib.sha256(stderr).hexdigest(),
         )
+
+
+def preflight(config: EngineConfig, images: tuple[str, ...]) -> list[str]:
+    """What is missing on this host before any reel can run, as fix-it lines (empty if ready)."""
+    engine = config.engine
+    problems: list[str] = []
+
+    def ok(*args: str) -> bool:
+        try:
+            proc = subprocess.run(  # noqa: S603 - argv list, no shell
+                [engine, *args], capture_output=True, timeout=30, check=False
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
+
+    if not ok("info"):
+        return [f"{engine} is not running or not reachable (try `{engine} info`)"]
+    for image in images:
+        if not ok("image", "inspect", image):
+            problems.append(
+                f"image {image} is missing: build it with `{engine} build` "
+                "(docs/runbooks/reel-pipeline.md, one-time setup step 1)"
+            )
+    start_proxy = "`docker compose -f docker/docker-compose.yml up -d egress-reel`"
+    if not ok("network", "inspect", config.egress_network):
+        problems.append(
+            f"network {config.egress_network} is missing: start the proxy with {start_proxy}"
+        )
+    elif config.egress_proxy and not _has_running_container(engine, config.egress_network):
+        problems.append(f"the download proxy is not running: start it with {start_proxy}")
+    return problems
+
+
+def _has_running_container(engine: str, network: str) -> bool:
+    try:
+        proc = subprocess.run(  # noqa: S603 - argv list, no shell
+            [engine, "ps", "-q", "--filter", f"network={network}"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0 and bool(proc.stdout.strip())

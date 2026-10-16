@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type SyntheticEvent } from "react";
 import { ApiError, getReels, submitReel } from "../api";
-import { REEL_STATUS_LABEL, formatAge, formatDuration } from "../format";
+import { REEL_STATUS_LABEL, formatAge, formatDuration, reelErrorText } from "../format";
 import type { Reel } from "../schemas";
 import { ContextReviews } from "./ContextReviews";
 
@@ -112,9 +112,14 @@ export function Content() {
                 {r.reel_code}
               </a>
               <span>{REEL_STATUS_LABEL[r.status]}</span>
-              {r.error_class && <span className="critical mono">{r.error_class}</span>}
               <span className="muted">{formatDuration(r.duration_ms)}</span>
               <span className="muted reel-age">{formatAge(ageSeconds(r.submitted_at))}</span>
+              {r.error_class && (
+                <p className="reel-error">
+                  <span className="critical">{reelErrorText(r.error_class)}</span>{" "}
+                  <span className="muted mono">{r.error_class}</span>
+                </p>
+              )}
             </li>
           ))}
         </ul>
