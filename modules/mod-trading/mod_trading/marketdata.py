@@ -32,9 +32,12 @@ from mod_trading.feed import quote_from_bar
 from mod_trading.schemas import Bar, Quote
 
 MCP_TOOL = "get_bars"
+DAILY_TOOL = "get_daily"
 MCP_PROTOCOL = "2025-03-26"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
-BAR_SECONDS = 60
+# How long after the provider's bar timestamp (its open) a bar closes. A daily bar opens at
+# 09:30 New York time and closes at 16:00.
+BAR_SECONDS = {"1m": 60, "1d": 6 * 3600 + 1800}
 SYMBOL = r"^[A-Z0-9.\-^=]{1,20}$"
 
 
@@ -68,7 +71,7 @@ class _Meta(_Strict):
 
 class _Result(_Strict):
     meta: _Meta
-    timestamp: list[int] = Field(default_factory=list, max_length=2000)
+    timestamp: list[int] = Field(default_factory=list, max_length=4000)
     indicators: _Indicators
 
 
@@ -85,8 +88,8 @@ def _price(value: float) -> Decimal:
     return Decimal(repr(value)).quantize(Decimal("0.000001"))
 
 
-def parse_chart(raw: str, instrument: str, *, now: datetime) -> list[Bar]:
-    """Closed 1-minute bars for `instrument`, oldest first. Raises MarketDataError otherwise."""
+def parse_chart(raw: str, instrument: str, *, now: datetime, granularity: str = "1m") -> list[Bar]:
+    """Closed bars for `instrument`, oldest first. Raises MarketDataError otherwise."""
     try:
         data = json.loads(raw)
     except ValueError as exc:
@@ -103,7 +106,7 @@ def parse_chart(raw: str, instrument: str, *, now: datetime) -> list[Bar]:
     result = chart.result[0]
     if result.meta.symbol.upper() != instrument.upper():
         raise MarketDataError("response is for another instrument")
-    if result.meta.dataGranularity != "1m":
+    if result.meta.dataGranularity != granularity:
         raise MarketDataError("response has the wrong bar size")
     q = result.indicators.quote[0]
     columns = (q.open, q.high, q.low, q.close, q.volume)
@@ -114,7 +117,7 @@ def parse_chart(raw: str, instrument: str, *, now: datetime) -> list[Bar]:
         o, h, low, c, v = (col[i] for col in columns)
         if o is None or h is None or low is None or c is None:
             continue  # the provider leaves minutes without trades empty
-        closed = datetime.fromtimestamp(opened + BAR_SECONDS, UTC)
+        closed = datetime.fromtimestamp(opened + BAR_SECONDS[granularity], UTC)
         if closed > now:
             continue  # still forming
         try:
@@ -202,7 +205,7 @@ class McpBarSource:
             headers["mcp-session-id"] = session
         return self._post(self._url, json.dumps(payload).encode(), headers)
 
-    def raw(self, symbol: str) -> str:
+    def raw(self, symbol: str, tool: str = MCP_TOOL) -> str:
         if not _symbol_ok(symbol):
             raise MarketDataError("symbol not allowed")
         init = self._send(
@@ -226,7 +229,7 @@ class McpBarSource:
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
-                "params": {"name": MCP_TOOL, "arguments": {"symbol": symbol}},
+                "params": {"name": tool, "arguments": {"symbol": symbol}},
             },
             session,
         )
@@ -248,6 +251,10 @@ class McpBarSource:
     def bars(self, symbol: str, now: datetime) -> list[Bar]:
         return parse_chart(self.raw(symbol), symbol, now=now)
 
+    def daily(self, symbol: str, now: datetime) -> list[Bar]:
+        """Up to ten years of daily bars, for backtests."""
+        return parse_chart(self.raw(symbol, DAILY_TOOL), symbol, now=now, granularity="1d")
+
 
 def _symbol_ok(symbol: str) -> bool:
     return re.fullmatch(SYMBOL, symbol) is not None
@@ -261,16 +268,17 @@ class BarSource(Protocol):
 
 
 class BarRecorder:
-    """Appends every traded bar to <dir>/<instrument>-<date>.csv, readable by `backtest`."""
+    """Appends bars to <dir>/<instrument>-<date>.csv (or one fixed file), readable by `backtest`."""
 
     FIELDS = ("ts", "instrument", "open", "high", "low", "close", "volume")
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, name: str | None = None) -> None:
         self._dir = directory
+        self._name = name
 
     def __call__(self, bar: Bar) -> None:
         self._dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path = self._dir / f"{bar.instrument}-{bar.ts.date().isoformat()}.csv"
+        path = self._dir / (self._name or f"{bar.instrument}-{bar.ts.date().isoformat()}.csv")
         new = not path.exists()
         with path.open("a", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)

@@ -3,6 +3,7 @@
     python -m mod_trading backtest --bars bars.csv --instrument SPY
     python -m mod_trading paper --bars today.csv --instrument SPY     # persistent paper account
     python -m mod_trading paper-live --instrument SPY                 # live bars through n8n
+    python -m mod_trading history --instrument SPY --out spy-daily.csv  # daily bars, backtests
     python -m mod_trading status
     python -m mod_trading kill-switch status|engage REASON|release
     python -m mod_trading ideas
@@ -41,7 +42,7 @@ from mod_trading.broker import PaperBroker
 from mod_trading.executor import TRADING_TOOLS, OrderExecutor
 from mod_trading.feed import read_bars, replay
 from mod_trading.inbox import TradingInbox
-from mod_trading.marketdata import BarRecorder, LiveFeed, McpBarSource
+from mod_trading.marketdata import BarRecorder, LiveFeed, MarketDataError, McpBarSource
 from mod_trading.session import SessionReport, run_session
 from mod_trading.strategies import SmaCrossover
 from trading_risk import KillSwitch, RiskEngine, RiskLimits
@@ -133,6 +134,20 @@ def live(args: argparse.Namespace) -> int:
     return 0
 
 
+def history_csv(args: argparse.Namespace) -> int:
+    try:
+        bars = McpBarSource(args.mcp_url).daily(args.instrument, datetime.now(UTC))
+    except MarketDataError as exc:
+        print(f"market data: {exc}", file=sys.stderr)
+        return 1
+    args.out.unlink(missing_ok=True)
+    record = BarRecorder(args.out.parent, name=args.out.name)
+    for bar in bars:
+        record(bar)
+    print(f"{len(bars)} daily bars of {args.instrument} written to {args.out}")
+    return 0
+
+
 def _executor(
     args: argparse.Namespace, clock: Callable[[], datetime], *, persistent: bool
 ) -> tuple[OrderExecutor, SmaCrossover] | None:
@@ -207,6 +222,15 @@ def main(argv: list[str] | None = None) -> int:
         run.add_argument("--step", type=Decimal, default=Decimal(1))
         run.add_argument("--cash", type=Decimal, default=Decimal(10_000))
         run.add_argument("--spread-bps", type=Decimal, default=Decimal(4))
+    history = sub.add_parser("history")
+    history.add_argument("--instrument", required=True)
+    history.add_argument("--out", type=Path, required=True)
+    history.add_argument(
+        "--mcp-url",
+        default=os.environ.get(
+            "JARVIS_MARKETDATA_MCP", "http://mcp-gateway-trading:8080/mcp/marketdata"
+        ),
+    )
     sub.add_parser("status")
     sub.add_parser("ideas")
     ks = sub.add_parser("kill-switch")
@@ -220,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
         return session(args, persistent=True)
     if args.command == "paper-live":
         return live(args)
+    if args.command == "history":
+        return history_csv(args)
     data = args.data_dir
     if args.command == "kill-switch":
         switch = KillSwitch(data / "killswitch")

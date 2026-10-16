@@ -71,6 +71,7 @@ mod_trading (net-trading) ──MCP──▶ mcp-gateway-trading ──▶ n8n-t
 - **Time:** live sessions run on the wall clock. A bar's quote is as old as its close, so data that stops arriving fails the risk engine's quote-age limit (`max_quote_age_s`) instead of trading on old prices.
 - **Start of a session:** the first poll returns today's bars so far. They prime the strategy's averages; intents on them are dropped. After that, each new closed bar goes through the normal order path.
 - **Recording:** every traded bar is appended to `<data-dir>/bars/<instrument>-<date>.csv`, which `backtest --bars` reads directly.
+- **History for backtests:** `python -m mod_trading history --instrument SPY --out spy-daily.csv` asks the second tool, `get_daily`, for up to ten years of daily bars and writes them as backtest CSV.
 
 ### One-time setup
 

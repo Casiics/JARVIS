@@ -253,3 +253,49 @@ def test_paper_live_polls_once(
     out = capsys.readouterr().out
     # The first poll is history only; nothing new arrived within the same poll.
     assert "SPY: 40 bars of history" in out and "bars 0, intents 0" in out
+
+
+def test_daily_bars_close_at_four_in_new_york() -> None:
+    start = datetime(2026, 10, 14, 13, 30, tzinfo=UTC)  # 09:30 New York
+    body = raw([500.0, 501.0, 502.0], start=start, granularity="1d")
+    # Minutes of the fake series are a day apart only in the timestamps we pass, so build them.
+    data = json.loads(body)
+    data["chart"]["result"][0]["timestamp"] = [
+        int((start + timedelta(days=i)).timestamp()) for i in range(3)
+    ]
+    now = start + timedelta(days=2, hours=3)  # the third session is still open
+    bars = parse_chart(json.dumps(data), "SPY", now=now, granularity="1d")
+    assert [b.ts for b in bars] == [
+        start + timedelta(hours=6, minutes=30),
+        start + timedelta(days=1, hours=6, minutes=30),
+    ]
+
+
+def test_history_writes_a_backtest_csv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class Source:
+        def __init__(self, url: str) -> None:
+            pass
+
+        def daily(self, symbol: str, now: datetime) -> list[Bar]:
+            return bars(3)
+
+    monkeypatch.setattr(cli, "McpBarSource", Source)
+    out = tmp_path / "spy-daily.csv"
+    out.write_text("stale")
+    assert cli.main(["history", "--instrument", "SPY", "--out", str(out)]) == 0
+    assert read_bars(out) == bars(3)
+    assert "3 daily bars" in capsys.readouterr().out
+
+
+def test_history_reports_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Down:
+        def __init__(self, url: str) -> None:
+            pass
+
+        def daily(self, symbol: str, now: datetime) -> list[Bar]:
+            raise MarketDataError("market data gateway unreachable")
+
+    monkeypatch.setattr(cli, "McpBarSource", Down)
+    assert cli.main(["history", "--instrument", "SPY", "--out", str(tmp_path / "x.csv")]) == 1
