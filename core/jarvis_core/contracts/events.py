@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.reel_url import canonical_reel_url
@@ -79,3 +79,40 @@ class ReelSubmitted(BoundaryEvent):
         if canonical_reel_url(value) != value:
             raise ValueError("source_ref must be a canonical reel URL")
         return value
+
+
+BriefId = Annotated[str, StringConstraints(pattern=r"^br:[0-9a-f]{24}$")]
+ShortLine = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+
+
+class ContextReviewRequested(BoundaryEvent):
+    """Content asks the owner, through the deck, whether a curated item may enter its context.
+
+    The one boundary event that carries content to core, so it is tightly bounded: public or
+    internal material only (enforced by the flow policy), short typed fields, no free prompt.
+    Everything in it is external content and the deck renders it as plain text.
+    """
+
+    kind: Literal["context_review_requested"] = "context_review_requested"
+    brief_id: BriefId
+    category: str = Field(pattern=r"^[a-z0-9-]{1,40}$")
+    proposal: Literal["store", "merge", "discard"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=1500)
+    facts: tuple[ShortLine, ...] = Field(default=(), max_length=10)
+    reasons: tuple[ShortLine, ...] = Field(default=(), max_length=8)
+    flags: tuple[ShortLine, ...] = Field(default=(), max_length=10)
+    source_refs: tuple[Annotated[str, StringConstraints(max_length=500)], ...] = Field(
+        default=(), max_length=10
+    )
+
+
+class ContextReviewDecided(BoundaryEvent):
+    """The owner's answer from the deck. Content applies it; core never touches the store."""
+
+    kind: Literal["context_review_decided"] = "context_review_decided"
+    brief_id: BriefId
+    accept: bool
+    decided_by: str = Field(max_length=200)
+    note: str = Field(default="", max_length=300)

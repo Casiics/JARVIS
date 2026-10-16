@@ -7,7 +7,9 @@ import { useAttention } from "./useAttention";
 export function Shell({ onSignedOut }: { onSignedOut: () => void }) {
   const attentionState = useAttention();
   const { attention } = attentionState;
-  const waiting = attention?.count ?? 0;
+  const approvals = attention?.count ?? 0;
+  const reviews = attention?.context_reviews ?? 0;
+  const waiting = approvals + reviews;
   const escalated = useEscalationCount();
 
   return (
@@ -17,9 +19,14 @@ export function Shell({ onSignedOut }: { onSignedOut: () => void }) {
         {DASHBOARDS.map((d) => (
           <NavLink key={d.path} to={d.path} end={d.path === "/"} className="nav-item">
             <span>{d.title}</span>
-            {d.path === "/" && waiting > 0 && (
-              <span className="badge" aria-label={`${String(waiting)} Freigaben offen`}>
-                {waiting}
+            {d.path === "/" && approvals > 0 && (
+              <span className="badge" aria-label={`${String(approvals)} Freigaben offen`}>
+                {approvals}
+              </span>
+            )}
+            {d.path === "/content" && reviews > 0 && (
+              <span className="badge" aria-label={`${String(reviews)} Kontext-Freigaben offen`}>
+                {reviews}
               </span>
             )}
             {d.path === "/agents" && escalated > 0 && (

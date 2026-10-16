@@ -20,6 +20,7 @@ import uvicorn
 
 from jarvis_core.api.app import GatewayDeps, GatewaySettings, TelemetryHub, create_app
 from jarvis_core.api.auth import sha256_hex
+from jarvis_core.api.context_reviews import ContextReviewDesk
 from jarvis_core.api.filestore import FileApprovalStore, FileCredentialStore
 from jarvis_core.api.reels import ReelDesk
 from jarvis_core.audit.chain import AuditStore, AuditWriter, InMemoryAuditStore
@@ -89,6 +90,13 @@ def main(argv: list[str] | None = None) -> None:
     threading.Thread(
         target=run_forever, args=(orchestrator, args.tick_seconds), daemon=True
     ).start()
+
+    # Own mailbox root: the reel desk consumes every letter in the main content-to-core box.
+    deps.context_reviews = ContextReviewDesk(
+        Mailbox(args.boundary_dir / "context-review", Domain.CORE),
+        args.data_dir / "context-reviews.json",
+        clock=lambda: datetime.now(UTC),
+    )
     uvicorn.run(create_app(settings, deps), host=args.host, port=args.port, proxy_headers=True)
 
 

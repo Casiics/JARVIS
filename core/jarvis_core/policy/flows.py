@@ -6,6 +6,9 @@ Rules (docs/architecture.md, section 5):
 - Content may only propose into the trading and private inboxes.
 - Every domain may report metadata to core; core may send tasks to every domain. Today the
   only task type is a reel the owner submitted in the deck (core -> content).
+- Content may ask the owner to review a curation decision in the deck (content -> core), and
+  the owner's answer goes back (core -> content). Only PUBLIC or INTERNAL material may be
+  sent for review, because it is shown in core's deck.
 - SECRET never crosses any boundary.
 """
 
@@ -16,6 +19,8 @@ from dataclasses import dataclass
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import (
     BoundaryEvent,
+    ContextReviewDecided,
+    ContextReviewRequested,
     LifeTipProposed,
     ReelSubmitted,
     TaskMetadata,
@@ -26,9 +31,9 @@ _ALLOWED: dict[tuple[Domain, Domain], frozenset[type[BoundaryEvent]]] = {
     (Domain.CONTENT, Domain.TRADING): frozenset({TradingIdeaProposed}),
     (Domain.CONTENT, Domain.PRIVATE): frozenset({LifeTipProposed}),
     (Domain.TRADING, Domain.CORE): frozenset({TaskMetadata}),
-    (Domain.CONTENT, Domain.CORE): frozenset({TaskMetadata}),
+    (Domain.CONTENT, Domain.CORE): frozenset({TaskMetadata, ContextReviewRequested}),
     (Domain.PRIVATE, Domain.CORE): frozenset({TaskMetadata}),
-    (Domain.CORE, Domain.CONTENT): frozenset({ReelSubmitted}),
+    (Domain.CORE, Domain.CONTENT): frozenset({ReelSubmitted, ContextReviewDecided}),
 }
 
 
@@ -53,6 +58,10 @@ def check_flow(event: BoundaryEvent, *, caller_domain: Domain) -> FlowDecision:
             f"{type(event).__name__} not allowed from {event.origin_domain} "
             f"to {event.target_domain}",
         )
+    if isinstance(event, ContextReviewRequested) and event.classification.at_least(
+        DataClassification.CONFIDENTIAL
+    ):
+        return FlowDecision(False, "only PUBLIC or INTERNAL material is shown for review")
     if event.origin_domain is Domain.PRIVATE and not isinstance(event, TaskMetadata):
         return FlowDecision(False, "only metadata leaves the private domain")
     return FlowDecision(True, "allowed by flow matrix")
