@@ -169,3 +169,37 @@ def test_the_deck_lists_orchestrator_tasks_as_metadata(deck: Deck, tmp_path: Pat
     assert task["task_id"] == task_id and task["domain"] == "content"
     assert task["kind"] == "reel" and task["state"] == "running"
     assert CANONICAL not in res.text  # the goal stays behind its hash
+
+
+def test_failed_reels_can_be_retried_in_one_go(
+    deck: Deck, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(reels_module, "MAX_OPEN", 2)
+    ids = [
+        deck.post("/api/content/reels", {"url": f"{CANONICAL[:-11]}{code}/"}).json()["reel"][
+            "task_id"
+        ]
+        for code in ("AAAAA1", "BBBBB2")
+    ]
+    for task_id in ids:
+        report(tmp_path, task_id, "escalated", "fetch_failed")
+    deck.client.get("/api/content/reels")  # picks up the failures
+    third = deck.post("/api/content/reels", {"url": f"{CANONICAL[:-11]}CCCCC3/"})
+    assert third.status_code == 201  # one of the two open slots is now taken
+
+    res = deck.post("/api/content/reels/retry")
+    assert res.status_code == 200
+    assert res.json() == {"retried": 1, "still_failed": 1}  # the cap leaves one for later
+    reels = deck.client.get("/api/content/reels").json()["reels"]
+    assert sorted(r["status"] for r in reels) == ["failed", "queued", "queued"]
+    retried = [e for e in deck.audit if e.target == "content:reel_retried"]
+    assert len(retried) == 1 and retried[0].content_hash
+    # The retry went to content as a new task.
+    sent = [letter.event for letter in content(tmp_path).receive(Domain.CORE)]
+    assert len(sent) == 4 and len({e.task_id for e in sent}) == 4  # type: ignore[attr-defined]
+
+
+def test_retry_needs_a_session(deck: Deck) -> None:
+    other = Deck()
+    other.deps.reels = deck.deps.reels
+    assert other.post("/api/content/reels/retry").status_code == 401

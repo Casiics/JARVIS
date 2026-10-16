@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ApiError, retryFailedReels } from "../api";
 import { DOMAIN_LABEL, STATE_LABEL, formatDuration } from "../format";
 import {
   ACTIVE_STATES,
@@ -103,6 +105,40 @@ function Constellation({ tasks, health }: { tasks: LiveTask[]; health: DomainHea
         );
       })}
     </svg>
+  );
+}
+
+function RetryReels() {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const retry = (): void => {
+    setBusy(true);
+    setMessage("");
+    retryFailedReels()
+      .then((r) => {
+        setMessage(
+          r.retried === 0
+            ? "Keine fehlgeschlagenen Reels zum Wiederholen."
+            : `${String(r.retried)} Reels sind wieder in der Warteschlange` +
+                (r.still_failed > 0 ? `, ${String(r.still_failed)} folgen, sobald Platz ist.` : "."),
+        );
+      })
+      .catch((err: unknown) => {
+        setMessage(err instanceof ApiError ? err.message : "Das hat nicht geklappt.");
+      })
+      .finally(() => {
+        setBusy(false);
+      });
+  };
+  return (
+    <div className="retry">
+      <button type="button" disabled={busy} onClick={retry}>
+        Fehlgeschlagene Reels erneut versuchen
+      </button>
+      <p className="muted message" role="status">
+        {message}
+      </p>
+    </div>
   );
 }
 
@@ -213,6 +249,7 @@ export function Agents() {
               </li>
             ))}
           </ul>
+          {escalated.some((t) => t.kind === "reel") && <RetryReels />}
         </section>
       </div>
 

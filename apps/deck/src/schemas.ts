@@ -119,3 +119,8 @@ export const OrchestratorTask = z.strictObject({
 export type OrchestratorTask = z.infer<typeof OrchestratorTask>;
 
 export const TaskList = z.strictObject({ tasks: z.array(OrchestratorTask) });
+
+export const RetryResult = z.strictObject({
+  retried: z.number().int().nonnegative(),
+  still_failed: z.number().int().nonnegative(),
+});
