@@ -163,3 +163,16 @@ def test_backtest_against_buy_and_hold_stays_within_limits(
     # Through the crash the trend filter is out of the market for most of the fall.
     drawdown = {name: float(cols[-1].rstrip("%")) for name, cols in rows.items()}
     assert drawdown["trend_vol_target"] < drawdown["buy_and_hold"]
+
+
+def test_sweep_shows_the_grid_next_to_buy_and_hold(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    csv = write_csv(tmp_path / "spy-daily.csv", daily(regimes()))
+    args = ["backtest", "--bars", str(csv), "--instrument", "SPY", "--strategy", "trend-vol"]
+    assert main([*args, "--sweep"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    names = [line.split()[0] for line in lines[2:]]
+    assert len(names) == 13 and names[-1] == "buy_and_hold"
+    assert "*200/0.10" in names  # the defaults are marked
+    assert not any(name.endswith("!") for name in names)  # no run hit the risk limits
