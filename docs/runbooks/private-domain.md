@@ -72,7 +72,7 @@ The CalDAV and IMAP credentials are read only by the assistant's deterministic c
 
 ## Known limits
 
-- **Reading without n8n.** The assistant reads CalDAV and IMAP itself instead of through an `n8n-private` MCP tool. n8n has no on-demand IMAP read node, and this path keeps the credentials in one deterministic process with an egress limited to two hosts. It differs from the target flow in architecture section 6.4 and from the "external calls go through n8n" wording in `CLAUDE.md`, so it waits for the owner's decision.
+- **Reading without n8n.** The assistant reads CalDAV and IMAP itself instead of through an `n8n-private` MCP tool: n8n has no on-demand IMAP read node, and this path keeps the credentials in one deterministic process with an egress limited to two hosts. Accepted as [decision 11](../decisions.md); it differs from the target flow in architecture section 6.4.
 - **Saving drafts to the mailbox is wired but not reachable yet.** `save_draft` checks a single-use approval grant and appends the draft to the IMAP Drafts folder (`\Draft \Seen`, never sent). Grants are HMAC-signed with core's `approval_grant_key`, which the private domain may not read, and the deck's approval queue does not span processes yet. Both arrive with the orchestrator service and Ed25519-signed grants. Until then, drafts stay in the private store and the unit tests cover the execution path.
 - **Audit** goes to a local hash-chained file in the data volume until the audit writer runs as a service.
 - **Recurring events** are marked as recurring but not expanded; only the first occurrence's time is known.

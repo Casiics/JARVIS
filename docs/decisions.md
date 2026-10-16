@@ -14,6 +14,7 @@ Accepted by the project owner on 2026-10-16 and aligned with the Zero-Trust secu
 | 8 | Event bus | **Redis Streams** | A second host joins: then NATS |
 | 9 | Trading supervisor | **Cloud with pseudonymised data** for strategy reviews, **local** for anything account-related | – |
 | 10 | Broker | **Broker-independent `BrokerAdapter`** (`get_quote`, `get_positions`, `place_order`, `cancel_order`). Must-haves: no withdrawal via API, IP allowlist, paper/testnet with the same API, EU regulation. Candidates to verify: Interactive Brokers (stocks, ETFs), an EU-licensed crypto exchange such as Kraken via CCXT | Before the first live key |
+| 11 | Private calendar and mail access | **Read directly by the private assistant's deterministic executor** (CalDAV `REPORT`, IMAP `EXAMINE`/`BODY.PEEK`), not through an n8n MCP tool: n8n has no on-demand IMAP read node. Credentials via `SecretProvider`, egress only to the two hosts via `egress-private`. Accepted 2026-10-16 (Phase 5) | n8n gains an on-demand IMAP read, or the private domain needs more external services |
 
 ## Corrections to the original context files
 
