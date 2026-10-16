@@ -7,9 +7,8 @@ from datetime import datetime
 from email.message import EmailMessage
 from typing import Any
 
-from mod_private.schemas import CalendarEvent, MailMessage
-
 from jarvis_core.router.client import ModelCall, ModelResult
+from mod_private.schemas import CalendarEvent, MailMessage
 
 KINDS = {
     "You sort one email": "triage",

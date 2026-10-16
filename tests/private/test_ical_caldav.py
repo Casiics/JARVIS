@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
+
 from mod_private.caldav import CalDAVClient, CalDAVError, https_transport, parse_multistatus
 from mod_private.ical import parse_events
 

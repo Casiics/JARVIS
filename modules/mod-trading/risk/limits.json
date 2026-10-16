@@ -1,0 +1,13 @@
+{
+  "instruments": ["SPY", "QQQ", "VWCE.DE", "BTC-EUR", "ETH-EUR"],
+  "max_order_notional": "1000",
+  "max_position_notional": "2500",
+  "max_gross_exposure": "8000",
+  "max_daily_loss": "200",
+  "max_drawdown": "0.10",
+  "max_orders_per_minute": 3,
+  "max_orders_per_day": 40,
+  "max_price_deviation": "0.02",
+  "max_quote_age_s": 120,
+  "allow_short": false
+}

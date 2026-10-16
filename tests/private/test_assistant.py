@@ -11,16 +11,6 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
-from mod_private.assistant import (
-    PRIVATE_TOOLS,
-    TOOL_BRIEFING,
-    PrivateAssistant,
-    ToolNotAllowed,
-)
-from mod_private.schemas import CalendarEvent, DraftStatus, MailMessage
-from mod_private.store import PrivateStore
-from mod_private.supervisor import LocalSupervisor
-from mod_private.workers import PrivateWorkers
 
 from jarvis_core.approvals.grant import (
     ApprovalGrant,
@@ -39,6 +29,16 @@ from jarvis_core.orchestrator.state_machine import TaskState
 from jarvis_core.router.budget import CircuitBreaker, InMemorySpendLedger
 from jarvis_core.router.catalog import ModelClass
 from jarvis_core.router.gateway import InferenceGateway
+from mod_private.assistant import (
+    PRIVATE_TOOLS,
+    TOOL_BRIEFING,
+    PrivateAssistant,
+    ToolNotAllowed,
+)
+from mod_private.schemas import CalendarEvent, DraftStatus, MailMessage
+from mod_private.store import PrivateStore
+from mod_private.supervisor import LocalSupervisor
+from mod_private.workers import PrivateWorkers
 from tests.private.fakes import ExplodingCloud, FakeCalendar, FakeMailSource, ScriptedModel
 
 BERLIN = ZoneInfo("Europe/Berlin")

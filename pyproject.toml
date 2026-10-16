@@ -39,6 +39,18 @@ packages = [
     "core/jarvis_core",
     "modules/mod-content/mod_content",
     "modules/mod-private/mod_private",
+    "modules/mod-trading/mod_trading",
+    "modules/mod-trading/risk/trading_risk",
+]
+
+# Editable installs put each package's parent on sys.path (the risk engine sits one level deeper).
+[tool.hatch.build]
+dev-mode-dirs = [
+    "core",
+    "modules/mod-content",
+    "modules/mod-private",
+    "modules/mod-trading",
+    "modules/mod-trading/risk",
 ]
 
 [tool.ruff]
@@ -50,14 +62,20 @@ select = ["E", "F", "I", "B", "UP", "S", "RUF"]
 ignore = ["S101"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["jarvis_core", "mod_content"]
+known-first-party = ["jarvis_core", "mod_content", "mod_private", "mod_trading", "trading_risk"]
 
 [tool.mypy]
 strict = true
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-mypy_path = ["core", "modules/mod-content", "modules/mod-private"]
-packages = ["jarvis_core", "mod_content", "mod_private"]
+mypy_path = [
+    "core",
+    "modules/mod-content",
+    "modules/mod-private",
+    "modules/mod-trading",
+    "modules/mod-trading/risk",
+]
+packages = ["jarvis_core", "mod_content", "mod_private", "mod_trading", "trading_risk"]
 exclude = ["modules/mod-content/sandbox/"]
 
 [tool.pytest.ini_options]
