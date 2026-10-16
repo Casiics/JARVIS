@@ -77,6 +77,17 @@ main { padding: 24px; }
 .domain-core { color: var(--d-core); }
 .tier { font-size: 13px; color: var(--muted); }
 .state-escalated { border-color: var(--critical); }
+.reel-failed { border-color: var(--critical); }
+.reel-awaiting_action { border-color: var(--warning); }
+.reel-running { border-color: var(--accent); }
+.reel-age { margin-left: auto; }
+.lane a { color: var(--text); }
+.intake { display: grid; gap: 8px; }
+.intake-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.intake-row input {
+  flex: 1 1 280px; min-height: 44px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); padding: 0 12px; font: inherit;
+}
 .state-awaiting_action { border-color: var(--warning); }
 
 .panel {

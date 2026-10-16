@@ -49,6 +49,7 @@ from jarvis_core.api.auth import (
     approval_challenge,
     sha256_hex,
 )
+from jarvis_core.api.reels import ReelDesk, ReelSubmission, TooManyOpenReels
 from jarvis_core.approvals.grant import (
     GRANT_TTL,
     ApprovalGrant,
@@ -64,6 +65,7 @@ from jarvis_core.approvals.store import (
 )
 from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import Domain
+from jarvis_core.contracts.reel_url import InvalidReelUrl
 from jarvis_core.contracts.telemetry import TelemetryEvent
 
 SESSION_COOKIE = "jarvis_session"
@@ -122,6 +124,7 @@ class GatewayDeps:
     telemetry: TelemetryHub = field(default_factory=TelemetryHub)
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     bootstrap_used: bool = False
+    reels: ReelDesk | None = None
 
 
 # --- request bodies ---------------------------------------------------------------------------
@@ -143,6 +146,10 @@ class CeremonyBody(_Body):
 
 class ApprovalOptionsBody(_Body):
     decision: Decision
+
+
+class ReelBody(_Body):
+    url: str = Field(max_length=500)
 
 
 # --- app --------------------------------------------------------------------------------------
@@ -413,6 +420,42 @@ def create_app(settings: GatewaySettings, deps: GatewayDeps) -> FastAPI:
         )
         return {"approval_id": str(approval_id), "status": decided.status.value}
 
+    # --- reel intake ---------------------------------------------------------------------
+
+    def reel_desk() -> ReelDesk:
+        if deps.reels is None:
+            raise HTTPException(503, "reel intake is not configured")
+        return deps.reels
+
+    @app.get("/api/content/reels")
+    def list_reels(request: Request) -> dict[str, Any]:
+        session_of(request)
+        desk = reel_desk()
+        desk.sync()
+        return {"reels": [_reel(s) for s in desk.all()]}
+
+    @app.post("/api/content/reels")
+    def submit_reel(body: ReelBody, request: Request, response: Response) -> dict[str, Any]:
+        session = session_of(request)
+        desk = reel_desk()
+        try:
+            submission, created = desk.submit(body.url)
+        except InvalidReelUrl as exc:
+            raise HTTPException(422, "Das ist kein Instagram-Reel-Link.") from exc
+        except TooManyOpenReels as exc:
+            raise HTTPException(429, "Zu viele Reels warten noch. Bitte später.") from exc
+        if created:
+            audit(
+                "content:reel_submitted",
+                AuditDecision.ALLOW,
+                action=AuditAction.BOUNDARY_EVENT,
+                actor=f"user:{session.user_id}",
+                task_id=submission.task_id,
+                content_hash=sha256_hex(submission.source_ref),
+            )
+        response.status_code = 201 if created else 200
+        return {"reel": _reel(submission), "created": created}
+
     # --- telemetry -----------------------------------------------------------------------
 
     @app.websocket("/ws/telemetry")
@@ -505,6 +548,19 @@ def _detail(approval: PendingApproval, now: datetime) -> dict[str, Any]:
     if req.domain is not Domain.PRIVATE:
         detail |= {"rationale": req.rationale, "parameters": req.parameters}
     return detail
+
+
+def _reel(submission: ReelSubmission) -> dict[str, Any]:
+    return {
+        "task_id": str(submission.task_id),
+        "reel_code": submission.reel_code,
+        "source_ref": submission.source_ref,
+        "status": submission.status.value,
+        "submitted_at": submission.submitted_at.isoformat(),
+        "updated_at": submission.updated_at.isoformat(),
+        "duration_ms": submission.duration_ms,
+        "error_class": submission.error_class,
+    }
 
 
 def _mount_deck(app: FastAPI, root: Path) -> None:

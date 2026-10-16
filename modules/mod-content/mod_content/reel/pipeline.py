@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import BoundaryEvent, Taint, TaskMetadata
+from jarvis_core.contracts.reel_url import canonical_reel_url
 from jarvis_core.contracts.task_token import TaskTokenClaims, TaskTokenError, verify_token
 from jarvis_core.orchestrator.state_machine import Event, Task, TaskMachine, TaskState
 from jarvis_core.policy.flows import check_flow
@@ -48,7 +49,6 @@ from mod_content.reel.schemas import (
     ExtractionDraft,
     ReelKnowledgeArtifact,
     Transcript,
-    canonical_reel_url,
 )
 from mod_content.reel.store import ReelRunRecord, StageMetric
 

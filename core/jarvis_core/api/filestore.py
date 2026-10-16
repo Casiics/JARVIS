@@ -23,7 +23,7 @@ _CREDENTIALS = TypeAdapter(list[StoredCredential])
 _APPROVALS = TypeAdapter(list[PendingApproval])
 
 
-def _write_atomic(path: Path, data: bytes) -> None:
+def write_atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
@@ -58,7 +58,7 @@ class FileCredentialStore(InMemoryCredentialStore):
             self._save()
 
     def _save(self) -> None:
-        _write_atomic(self._path, _CREDENTIALS.dump_json(list(self._items.values())))
+        write_atomic(self._path, _CREDENTIALS.dump_json(list(self._items.values())))
 
 
 class FileApprovalStore(InMemoryApprovalStore):
@@ -83,4 +83,4 @@ class FileApprovalStore(InMemoryApprovalStore):
             return decided
 
     def _save(self) -> None:
-        _write_atomic(self._path, _APPROVALS.dump_json(list(self._items.values())))
+        write_atomic(self._path, _APPROVALS.dump_json(list(self._items.values())))

@@ -74,3 +74,22 @@ export const DecisionResult = z.strictObject({
   approval_id: z.uuid(),
   status: z.enum(["approved", "rejected"]),
 });
+
+// Reel intake (core/jarvis_core/api/reels.py). Status is metadata content reports back.
+export const ReelStatus = z.enum(["queued", "running", "done", "awaiting_action", "failed"]);
+export type ReelStatus = z.infer<typeof ReelStatus>;
+
+export const Reel = z.strictObject({
+  task_id: z.uuid(),
+  reel_code: z.string().regex(/^[A-Za-z0-9_-]{5,40}$/),
+  source_ref: z.url({ protocol: /^https$/, hostname: /^www\.instagram\.com$/ }),
+  status: ReelStatus,
+  submitted_at: z.iso.datetime({ offset: true }),
+  updated_at: z.iso.datetime({ offset: true }),
+  duration_ms: z.number().int().nonnegative().nullable(),
+  error_class: slug.nullable(),
+});
+export type Reel = z.infer<typeof Reel>;
+
+export const ReelList = z.strictObject({ reels: z.array(Reel) });
+export const ReelSubmitResult = z.strictObject({ reel: Reel, created: z.boolean() });

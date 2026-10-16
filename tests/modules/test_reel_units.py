@@ -11,6 +11,7 @@ import pytest
 
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import LifeTipProposed, Taint, TradingIdeaProposed
+from jarvis_core.contracts.reel_url import InvalidReelUrl, canonical_reel_url
 from jarvis_core.contracts.task_token import TaskTokenClaims
 from jarvis_core.gate.action_gate import GateOutcome
 from mod_content.reel.dispatch import PROPOSE_SKILL_TOOL, plan_follow_ups
@@ -32,11 +33,9 @@ from mod_content.reel.sandbox import (
     build_command,
 )
 from mod_content.reel.schemas import (
-    InvalidReelUrl,
     ReelKnowledgeArtifact,
     ReelMetadata,
     TargetModule,
-    canonical_reel_url,
 )
 from tests.modules.reel_fakes import JPEG, MP4, WAV, good_draft, write_dir
 

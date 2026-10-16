@@ -4,7 +4,8 @@ Rules (docs/architecture.md, section 5):
 - Cross-domain data moves only as typed boundary events.
 - Nothing leaves the private domain.
 - Content may only propose into the trading and private inboxes.
-- Every domain may report metadata to core; core may send tasks to every domain.
+- Every domain may report metadata to core; core may send tasks to every domain. Today the
+  only task type is a reel the owner submitted in the deck (core -> content).
 - SECRET never crosses any boundary.
 """
 
@@ -16,6 +17,7 @@ from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import (
     BoundaryEvent,
     LifeTipProposed,
+    ReelSubmitted,
     TaskMetadata,
     TradingIdeaProposed,
 )
@@ -26,6 +28,7 @@ _ALLOWED: dict[tuple[Domain, Domain], frozenset[type[BoundaryEvent]]] = {
     (Domain.TRADING, Domain.CORE): frozenset({TaskMetadata}),
     (Domain.CONTENT, Domain.CORE): frozenset({TaskMetadata}),
     (Domain.PRIVATE, Domain.CORE): frozenset({TaskMetadata}),
+    (Domain.CORE, Domain.CONTENT): frozenset({ReelSubmitted}),
 }
 
 

@@ -42,5 +42,5 @@ Caddy terminates TLS on the tailnet and proxies to `127.0.0.1:8080`, including t
 ## Known limits
 
 - No domain feeds the approval queue across processes yet. The orchestrator and domain services arrive with Phases 5 and 6. Until then, approvals are queued in-process with `hold()`.
-- Six of the seven dashboards are a frame with navigation and deep links. Their data arrives with the phases noted on each page.
+- Five of the seven dashboards are a frame with navigation and deep links. Content has the reel intake (docs/runbooks/reel-pipeline.md); the gateway's `--boundary-dir` (default `/var/lib/jarvis/boundary`) must match the reel worker's.
 - Kill switch and daily spend in the top bar arrive with the trading domain and the FinOps service (Phase 6), together with the services they act on.

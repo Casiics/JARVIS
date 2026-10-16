@@ -7,9 +7,10 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from jarvis_core.contracts.classification import DataClassification, Domain
+from jarvis_core.contracts.reel_url import canonical_reel_url
 
 
 class Taint(StrEnum):
@@ -57,3 +58,22 @@ class TaskMetadata(BoundaryEvent):
     state: str = Field(max_length=40)
     duration_ms: int = Field(ge=0)
     error_class: str | None = Field(default=None, max_length=80)
+
+
+class ReelSubmitted(BoundaryEvent):
+    """Core asks content to process one reel the owner submitted in the deck.
+
+    Carries only the canonical reel reference and the task id under which content reports
+    progress back as TaskMetadata. Never carries the reel's content.
+    """
+
+    kind: Literal["reel_submitted"] = "reel_submitted"
+    task_id: UUID
+    source_ref: str = Field(max_length=200)
+
+    @field_validator("source_ref")
+    @classmethod
+    def _canonical(cls, value: str) -> str:
+        if canonical_reel_url(value) != value:
+            raise ValueError("source_ref must be a canonical reel URL")
+        return value
