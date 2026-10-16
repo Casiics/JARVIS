@@ -62,6 +62,21 @@ class TaskMetadata(BoundaryEvent):
     cost_eur: float = Field(default=0.0, ge=0, le=1000)
 
 
+class AuditAnchor(BoundaryEvent):
+    """A domain's local audit chain head, anchored in core's central audit log.
+
+    Domain processes keep their own hash-chained audit file (they cannot reach pg-audit).
+    Sending the head regularly to core means a later rewrite, truncation or deletion of that
+    file no longer goes unnoticed: the anchored (entries, head_hash) pairs in core's log must
+    still match the file. Hashes and counts only, never entries.
+    """
+
+    kind: Literal["audit_anchor"] = "audit_anchor"
+    chain: str = Field(pattern=r"^[a-z][a-z0-9-]{0,39}$", description="name of the local chain")
+    entries: int = Field(ge=0)
+    head_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ReelSubmitted(BoundaryEvent):
     """Core asks content to process one reel the owner submitted in the deck.
 

@@ -75,3 +75,11 @@ uv run python -m jarvis_core.agents smoke --runtime hermes
 ```
 
 `HermesRuntime(gateway, domain)` writes a throw-away `~/.hermes/config.yaml` per turn (`provider: custom`, a task-scoped loopback endpoint as `base_url`, a random key, `platform_toolsets.cli: []`) and runs `hermes -z <prompt>` with only `HOME`, `PATH`, `LANG` set. Every request Hermes makes goes through the inference gateway (routing policy, budget, audit); tool definitions it sends are dropped. In production prefix `command` with the sandbox runner. The gateway now loads every local model with its own fixed window (`router/catalog.py: local_context`), so Ollama does not reload models between calls; this also fixes the 32k coding fallback, which used to run at 8k.
+
+## Audit anchors from the domains
+
+Domain processes keep their own hash-chained audit file because they cannot reach pg-audit. After every reel the content worker sends an `AuditAnchor` (chain name, entry count, head hash; nothing else) to core. The orchestrator writes each new anchor into core's central audit log as `audit_anchor:<domain>/<chain>` with the head in `content_hash` and `entries=<n>` in `content_ref`, and keeps the latest one per chain in `<data-dir>/audit-anchors.json`.
+
+An anchor with fewer entries than the last one, or the same count with a different head, means the local file was truncated or rewritten. It is logged as a `deny` with `policy_id = audit-anchor-rollback`, and the last good head stays the reference. To check a file by hand against any anchor from the central log, use `jarvis_core.boundary.anchor.matches_anchor(entries, count, head_hash)`.
+
+The trading executor and the private assistant can send anchors the same way (`jarvis_core.boundary.anchor.anchor_event`) once they run with a boundary mailbox.
