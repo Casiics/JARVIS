@@ -2,7 +2,8 @@
 # Starts the command deck on http://localhost:8080 for a local trial, without SOPS, Postgres
 # or a tailnet. Creates throwaway secrets under JARVIS_DECK_LOCAL_DIR (default
 # ~/.local/share/jarvis-deck-local), builds the deck, and prints the one-time setup code.
-# Never use this on the server: the audit log stays in memory and the origin is plain http.
+# Never use this on the server: the origin is plain http and the audit log is a local file
+# chain (<state>/data/audit.jsonl), not pg-audit.
 #
 # Requires: uv, pnpm, openssl. Passkeys need a browser with a platform authenticator
 # (Touch ID, Windows Hello) or a security key.
