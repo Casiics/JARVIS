@@ -55,6 +55,30 @@ Limits: edit `modules/mod-trading/risk/limits.json`. It is a protected path, so 
 
 Ideas from the content domain (`TradingIdeaProposed`) enter through the boundary policy and keep their taint (`mod_trading.inbox`). `python -m mod_trading ideas` lists them. They are notes for review and have no path to the executor.
 
+## Baseline strategy: trend filter plus volatility target
+
+`--strategy trend-vol` (`mod_trading.strategies.TrendVolTarget`) is the rule-based baseline every later strategy has to beat. Long only, one instrument:
+
+- **Trend filter:** invested only while the close is above its 200-bar average (`--trend`).
+- **Volatility target:** while invested, the position is `capital × min(1, target_vol / realised_vol)`, with realised volatility from the last 20 returns (`--vol-window`), annualised, and `--target-vol 0.10`. Calm markets get the full `--capital`, turbulent ones less.
+- **Trading:** rebalances only when the gap exceeds 10 % of the capital, and splits orders to stay under the risk limits' order size and per-minute count. `--capital` defaults to 2400, just under the 2500 position limit, because fills happen at the ask.
+
+`backtest --compare` prints both curves on the same account (same starting cash), the strategy and buying `--capital` worth on the first bar and holding it:
+
+```bash
+uv run python -m mod_trading backtest --bars spy-daily.csv --instrument SPY --strategy trend-vol --compare
+```
+
+```
+                      return     CAGR      vol  Sharpe   max DD
+trend_vol_target       6.96%    3.16%    1.65%    1.31    2.03%
+buy_and_hold          10.96%    4.93%    5.81%    0.60   11.18%
+```
+
+(Synthetic data from `tests/trading/test_trend_vol.py`: three years with a crash. Figures are on the whole account, so with 2400 of 10 000 invested they are smaller than the instrument's own.) Bar frequency is inferred: 252 bars a year for daily bars, more for intraday. Expect the strategy to lag buy-and-hold in steady bull markets and to win on drawdown in crashes; that trade-off is the point of a baseline. It is paper only: the executor refuses any broker but the paper broker.
+
+Daily bars: any CSV in the format above works, for example an export of SPY's daily history. The live feed records 1-minute bars under `<data-dir>/bars/` for intraday backtests.
+
 ## Live market data
 
 `paper-live` trades the same paper account on live 1-minute bars instead of a CSV:

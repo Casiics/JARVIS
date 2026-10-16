@@ -28,6 +28,7 @@ class SessionReport:
     end_equity: Decimal | None = None
     max_drawdown: Decimal = Decimal(0)
     results: list[ExecutionResult] = field(default_factory=list)
+    equity: list[tuple[datetime, Decimal]] = field(default_factory=list)
 
 
 def run_session(
@@ -49,6 +50,7 @@ def run_session(
         report.bars += 1
         report.start_equity = report.start_equity or account.equity
         report.end_equity = account.equity
+        report.equity.append((quote.ts, account.equity))
         peak = max(peak or account.equity, account.equity)
         report.max_drawdown = max(report.max_drawdown, (peak - account.equity) / peak)
         for intent in strategy.on_bar(bar, account):

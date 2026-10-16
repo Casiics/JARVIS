@@ -42,8 +42,9 @@ from mod_trading.executor import TRADING_TOOLS, OrderExecutor
 from mod_trading.feed import read_bars, replay
 from mod_trading.inbox import TradingInbox
 from mod_trading.marketdata import BarRecorder, LiveFeed, McpBarSource
+from mod_trading.metrics import Performance, bars_per_year, buy_and_hold, performance
 from mod_trading.session import SessionReport, run_session
-from mod_trading.strategies import SmaCrossover
+from mod_trading.strategies import SmaCrossover, Strategy, TrendVolTarget
 from trading_risk import KillSwitch, RiskEngine, RiskLimits
 
 DEFAULT_LIMITS = Path(__file__).resolve().parents[1] / "risk" / "limits.json"
@@ -99,7 +100,32 @@ def session(args: argparse.Namespace, *, persistent: bool) -> int:
     bars = read_bars(args.bars)
     report = run_session(replay(bars, args.spread_bps), strategy, executor, claims, clock.set)
     print_report(report)
+    if getattr(args, "compare", False) and len(report.equity) >= 2:
+        per_year = bars_per_year(bars)
+        mine = [b for b in bars if b.instrument == args.instrument]
+        # Spread half plus the paper broker's slippage (5 bps) and fee (10 bps).
+        cost = args.spread_bps / 2 + Decimal(15)
+        held = buy_and_hold(mine, cash=args.cash, capital=args.capital, cost_bps=cost)
+        print_comparison(
+            {
+                strategy.name: performance(report.equity, per_year),
+                "buy_and_hold": performance(held, per_year),
+            }
+        )
     return 0
+
+
+def print_comparison(rows: dict[str, Performance]) -> None:
+    def pct(value: float | None) -> str:
+        return "-" if value is None else f"{value:.2%}"
+
+    print(f"{'':18} {'return':>9} {'CAGR':>8} {'vol':>8} {'Sharpe':>7} {'max DD':>8}")
+    for name, p in rows.items():
+        sharpe = "-" if p.sharpe is None else f"{p.sharpe:.2f}"
+        print(
+            f"{name:18} {pct(p.total_return):>9} {pct(p.cagr):>8} {pct(p.volatility):>8} "
+            f"{sharpe:>7} {pct(p.max_drawdown):>8}"
+        )
 
 
 def live(args: argparse.Namespace) -> int:
@@ -135,7 +161,7 @@ def live(args: argparse.Namespace) -> int:
 
 def _executor(
     args: argparse.Namespace, clock: Callable[[], datetime], *, persistent: bool
-) -> tuple[OrderExecutor, SmaCrossover] | None:
+) -> tuple[OrderExecutor, Strategy] | None:
     tz = ZoneInfo(args.tz)
     limits = load_limits(args.limits)
     if persistent:
@@ -163,13 +189,26 @@ def _executor(
         audit=audit,
         clock=clock,
     )
-    strategy = SmaCrossover(
-        args.instrument,
-        fast=args.fast,
-        slow=args.slow,
-        notional=args.notional,
-        quantity_step=args.step,
-    )
+    strategy: Strategy
+    if args.strategy == "trend-vol":
+        strategy = TrendVolTarget(
+            args.instrument,
+            trend=args.trend,
+            vol_window=args.vol_window,
+            target_vol=args.target_vol,
+            capital=args.capital,
+            max_order_notional=min(args.capital, limits.max_order_notional),
+            max_orders_per_bar=limits.max_orders_per_minute,
+            quantity_step=args.step,
+        )
+    else:
+        strategy = SmaCrossover(
+            args.instrument,
+            fast=args.fast,
+            slow=args.slow,
+            notional=args.notional,
+            quantity_step=args.step,
+        )
     return executor, strategy
 
 
@@ -201,6 +240,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             run.add_argument("--bars", type=Path, required=True)
         run.add_argument("--instrument", required=True)
+        run.add_argument("--strategy", choices=["sma", "trend-vol"], default="sma")
+        run.add_argument("--trend", type=int, default=200, help="trend-vol: average length")
+        run.add_argument("--vol-window", type=int, default=20, help="trend-vol: returns")
+        run.add_argument("--target-vol", type=float, default=0.10, help="trend-vol: annual")
+        run.add_argument("--capital", type=Decimal, default=Decimal(2400), help="trend-vol")
+        if name == "backtest":
+            run.add_argument(
+                "--compare", action="store_true", help="compare with buy-and-hold of --capital"
+            )
         run.add_argument("--fast", type=int, default=10)
         run.add_argument("--slow", type=int, default=30)
         run.add_argument("--notional", type=Decimal, default=Decimal(1000))
