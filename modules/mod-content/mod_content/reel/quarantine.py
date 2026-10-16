@@ -15,6 +15,7 @@ from uuid import UUID
 
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import Taint
+from jarvis_core.quarantine import neutralise, wrap
 from jarvis_core.router.catalog import ModelClass
 from jarvis_core.router.client import ChatMessage
 from jarvis_core.router.gateway import GatewayResult, InferenceGateway
@@ -47,20 +48,7 @@ Return one JSON object with exactly these fields:
 - utility_score: 0.0 to 1.0, how useful and concrete the material is
 """
 
-_MARKERS = ("<untrusted", "</untrusted")
-
-
-def neutralise(text: str) -> str:
-    """Stop external text from opening or closing the untrusted wrapper."""
-    out = text.replace("\x00", "")
-    for marker in _MARKERS:
-        out = out.replace(marker, marker.replace("<", "&lt;"))
-        out = out.replace(marker.upper(), marker.upper().replace("<", "&lt;"))
-    return out
-
-
-def wrap(source: str, text: str, limit: int) -> str:
-    return f'<untrusted source="{source}">\n{neutralise(text[:limit])}\n</untrusted>'
+__all__ = ["QuarantinedWorker", "build_extraction_messages", "neutralise", "wrap"]
 
 
 def build_extraction_messages(

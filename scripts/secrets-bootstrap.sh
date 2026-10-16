@@ -17,6 +17,11 @@ declare -A KEYS=(
   [content]="pg_superuser_password pg_app_password pg_agent_ro_password qdrant_api_key n8n_encryption_key"
   [private]="pg_superuser_password pg_app_password pg_agent_ro_password qdrant_api_key redis_password n8n_encryption_key"
 )
+# Account credentials Jarvis cannot generate. They start empty; fill them in with
+# `sops secrets/<domain>.sops.yaml` once the account exists (docs/runbooks/private-domain.md).
+declare -A ACCOUNT_KEYS=(
+  [private]="caldav_username caldav_password imap_username imap_password"
+)
 DOMAINS=(core trading content private)
 
 for tool in age-keygen sops openssl; do
@@ -50,6 +55,9 @@ for domain in "${DOMAINS[@]}"; do
   trap 'rm -f "$plain"' EXIT
   for key in ${KEYS[$domain]}; do
     printf '%s: "%s"\n' "$key" "$(openssl rand -hex 32)" >> "$plain"
+  done
+  for key in ${ACCOUNT_KEYS[$domain]:-}; do
+    printf '%s: ""\n' "$key" >> "$plain"
   done
   (cd "$REPO_ROOT" && sops --encrypt --filename-override "secrets/$domain.sops.yaml" \
       --input-type yaml --output-type yaml "$plain" > "$target")
