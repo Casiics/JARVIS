@@ -130,3 +130,19 @@ a higher signal. The inbox carries no label, so items fail closed to PRIVATE; tr
 stay in the terminal and never reach the deck. Thresholds are high on purpose: nothing from
 social media enters trading context without the owner. Curated notes are research context for
 trading's agents, never signals or orders.
+
+## Private domain (Life-OS)
+
+Fully local and PRIVATE. Sources are the life tips other domains proposed into the private
+inbox (`inbox.json`, tainted, signal 0.5, so they always wait for you) and your own notes in
+`<data-dir>/curation/inbox/` (signal 0.8 by default, so clear notes are stored directly):
+
+```bash
+uv run python -m mod_private.curation --data-dir ~/jarvis-data/private run
+uv run python -m mod_private.curation --data-dir ~/jarvis-data/private review
+uv run python -m mod_private.curation --data-dir ~/jarvis-data/private search "sleep"
+```
+
+Categories: `modules/mod-private/mod_private/curation/categories.yaml` (`health`, `habits`,
+`productivity`, `finance`, `general`). There is no deck bridge and no boundary event: curated
+private context never leaves the domain, and no stage calls a model.

@@ -1,0 +1,26 @@
+# Context categories of the private domain (Life-OS). Everything is PRIVATE, stays local and is
+# reviewed only in the terminal. Your own notes start at signal 0.8; tips proposed by other
+# domains start at 0.5 and therefore always wait for you.
+domain: private
+default_category: general
+categories:
+  - name: health
+    description: Sleep, training, nutrition
+    keywords: [sleep, training, workout, fitness, nutrition, health, protein, run, gym]
+    max_classification: private
+  - name: habits
+    description: Routines and habits
+    keywords: [habit, habits, routine, morning, evening, journal, streak]
+    max_classification: private
+  - name: productivity
+    description: Focus, planning, tools for getting things done
+    keywords: [focus, planning, calendar, todo, deep, work, inbox, priorities]
+    max_classification: private
+  - name: finance
+    description: Personal finance (not trading strategies)
+    keywords: [budget, savings, tax, insurance, pension, rent, expenses]
+    auto_store_at: 0.8
+    max_classification: private
+  - name: general
+    description: Everything else
+    max_classification: private
