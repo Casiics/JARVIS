@@ -118,3 +118,19 @@ def test_the_config_has_no_toolsets_and_only_the_scoped_endpoint() -> None:
     text = hermes_config("http://127.0.0.1:1234/v1", "k")
     assert "provider: custom" in text and "base_url: http://127.0.0.1:1234/v1" in text
     assert "cli: []" in text
+
+
+def test_hermes_runs_on_the_long_context_agent_model() -> None:
+    rig = Rig()
+    rig.run("Summarise this.")
+    [call] = rig.model.calls
+    assert call.model == "ollama/hermes3:8b"
+    assert call.context_tokens == 65536  # Hermes asks for at least 64k
+
+
+def test_every_local_model_is_loaded_with_its_own_fixed_window() -> None:
+    from jarvis_core.router.catalog import LOCAL_MODELS, LONG_CONTEXT_CODING, local_context
+
+    assert local_context(LOCAL_MODELS[ModelClass.REASONING].name) == 8192
+    assert local_context(LONG_CONTEXT_CODING.name) == 32768
+    assert local_context("ollama/unknown") == 8192
