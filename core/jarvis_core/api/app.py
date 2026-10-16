@@ -49,7 +49,7 @@ from jarvis_core.api.auth import (
     approval_challenge,
     sha256_hex,
 )
-from jarvis_core.api.reels import ReelDesk, ReelSubmission, TooManyOpenReels
+from jarvis_core.api.reels import ReelDesk, ReelStatus, ReelSubmission, TooManyOpenReels
 from jarvis_core.approvals.grant import (
     GRANT_TTL,
     ApprovalGrant,
@@ -458,6 +458,25 @@ def create_app(settings: GatewaySettings, deps: GatewayDeps) -> FastAPI:
         response.status_code = 201 if created else 200
         return {"reel": _reel(submission), "created": created}
 
+    @app.post("/api/content/reels/retry")
+    def retry_reels(request: Request) -> dict[str, Any]:
+        """Queue every failed reel again (e.g. after a fix in the content worker)."""
+        session = session_of(request)
+        desk = reel_desk()
+        desk.sync()
+        retried = desk.retry_failed()
+        for submission in retried:
+            audit(
+                "content:reel_retried",
+                AuditDecision.ALLOW,
+                action=AuditAction.BOUNDARY_EVENT,
+                actor=f"user:{session.user_id}",
+                task_id=submission.task_id,
+                content_hash=sha256_hex(submission.source_ref),
+            )
+        still_failed = sum(s.status is ReelStatus.FAILED for s in desk.all())
+        return {"retried": len(retried), "still_failed": still_failed}
+
     # --- orchestrator ---------------------------------------------------------------------
 
     @app.get("/api/tasks")
@@ -586,6 +605,7 @@ def _task(record: TaskRecord) -> dict[str, Any]:
         "updated_at": record.updated_at.isoformat(),
         "duration_ms": record.duration_ms,
         "error_class": record.error_class,
+        "cost_eur": round(record.cost_eur, 6),
     }
 
 

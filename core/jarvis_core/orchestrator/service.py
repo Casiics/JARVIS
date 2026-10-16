@@ -121,6 +121,7 @@ class TaskRecord(BaseModel):
     duration_ms: int | None = Field(default=None, ge=0)
     error_class: str | None = Field(default=None, max_length=80)
     reports: int = Field(default=0, ge=0)
+    cost_eur: float = Field(default=0.0, ge=0)
 
     @property
     def settled(self) -> bool:
@@ -313,6 +314,8 @@ class Orchestrator:
                 "duration_ms": event.duration_ms,
                 "error_class": event.error_class,
                 "reports": record.reports + 1,
+                # Reports carry the running total; a lower number never lowers it.
+                "cost_eur": max(record.cost_eur, event.cost_eur),
                 "deadline": max(record.deadline, self._clock() + self._deadline),
             }
         )
@@ -354,6 +357,7 @@ class Orchestrator:
                 node=node,
                 state=TelemetryState(record.state.value),
                 duration_ms=record.duration_ms or 0,
+                cost_eur=round(record.cost_eur, 6),
                 error_class=_safe_error(record.error_class),
             )
         )

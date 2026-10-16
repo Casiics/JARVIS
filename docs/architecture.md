@@ -274,6 +274,8 @@ The semantic cache is per domain and never stores `CONFIDENTIAL`, `PRIVATE` or `
 
 The dashboard observes and approves; it is not a privileged control channel. It talks only to the API gateway. Telemetry events carry task id, domain, node, state, duration, cost, model class and error class, never prompts, outputs or raw data. Views: live DAG, approval deck, FinOps, trading cockpit with kill switch, audit explorer, private view (metadata only by default). Details are in the dashboard concept.
 
+Implemented: the **Agenten** view (`apps/deck/src/pages/Agents.tsx`) shows the orchestrator's tasks live from `/api/tasks` and `/ws/telemetry`: a constellation of the orchestrator and the worker domains, each task's stage in the loop, escalations with a plain-language cause, today's model spend, and a one-click retry for failed reels. The top bar counts escalations of the last 24 hours.
+
 ## 10. Deployment and operations
 
 - **Workstation**: `scripts/secrets-unpack.sh`, then `docker compose -f docker/docker-compose.yml up -d`.

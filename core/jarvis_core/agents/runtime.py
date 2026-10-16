@@ -94,11 +94,17 @@ class GatewayRuntime:
 
     def run(self, turn: AgentTurn, scope: TurnScope) -> AgentReply:
         check_scope(self, scope)
+        model_class = turn.model_class
+        if self.require_local and model_class is ModelClass.SUPERVISOR:
+            # The routing policy sends supervisor calls to the cloud whenever the label allows
+            # it. A runtime pinned to local models asks for the reasoning class instead, which
+            # is the same local model the supervisor class uses.
+            model_class = ModelClass.REASONING
         try:
             result = self.gateway.complete(
                 caller_domain=self.domain,
                 label=scope.label,
-                model_class=turn.model_class,
+                model_class=model_class,
                 messages=(
                     ChatMessage(role="system", content=turn.system),
                     ChatMessage(role="user", content=turn.prompt),

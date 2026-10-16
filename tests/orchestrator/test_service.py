@@ -274,3 +274,39 @@ def test_end_to_end_a_reel_runs_through_the_content_worker_and_back(
         TelemetryState.RUNNING,
         TelemetryState.DONE,
     ]
+
+
+def test_the_status_command_lists_tasks_without_touching_mailboxes(
+    h: Harness, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from jarvis_core.orchestrator import __main__ as status_cli
+
+    record = h.orchestrator.submit(ReelGoal(source_ref=REEL))
+    h.report(record.task_id, "escalated", error="fetch_failed")
+    h.orchestrator.sync()
+    h.report(record.task_id, "done")  # stays queued: the command never reads mailboxes
+
+    assert status_cli.main(["--data-dir", str(h.root / "core"), "status"]) == 0
+    out = capsys.readouterr().out
+    assert "escalated: 1" in out and "fetch_failed" in out and REEL not in out
+    assert len(h.mailbox(Domain.CORE).receive(Domain.CONTENT)) == 1
+
+
+def test_reported_cost_is_kept_as_a_running_total(h: Harness) -> None:
+    record = h.orchestrator.submit(ReelGoal(source_ref=REEL))
+    for cost in (0.01, 0.03, 0.02):  # a late, lower report never lowers the total
+        h.mailbox(Domain.CONTENT).send(
+            TaskMetadata(
+                origin_domain=Domain.CONTENT,
+                target_domain=Domain.CORE,
+                classification=DataClassification.INTERNAL,
+                task_id=record.task_id,
+                state="running",
+                duration_ms=10,
+                cost_eur=cost,
+            )
+        )
+    h.orchestrator.sync()
+    task = h.orchestrator.get(record.task_id)
+    assert task is not None and task.cost_eur == pytest.approx(0.03)
+    assert h.telemetry[-1].cost_eur == pytest.approx(0.03)

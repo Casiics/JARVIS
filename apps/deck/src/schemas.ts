@@ -93,3 +93,35 @@ export type Reel = z.infer<typeof Reel>;
 
 export const ReelList = z.strictObject({ reels: z.array(Reel) });
 export const ReelSubmitResult = z.strictObject({ reel: Reel, created: z.boolean() });
+
+// Orchestrator tasks (core/jarvis_core/api/app.py `_task`). Metadata only: the goal stays a hash.
+export const TaskState = z.enum([
+  "planned",
+  "running",
+  "gate_check",
+  "supervisor_qa",
+  "awaiting_action",
+  "executing",
+  "done",
+  "escalated",
+]);
+
+export const OrchestratorTask = z.strictObject({
+  task_id: z.uuid(),
+  kind: z.string().max(40).regex(/^[a-z0-9_-]+$/),
+  domain: Domain,
+  state: TaskState,
+  created_at: z.iso.datetime({ offset: true }),
+  updated_at: z.iso.datetime({ offset: true }),
+  duration_ms: z.number().int().nonnegative().nullable(),
+  error_class: z.string().max(80).nullable(),
+  cost_eur: z.number().nonnegative(),
+});
+export type OrchestratorTask = z.infer<typeof OrchestratorTask>;
+
+export const TaskList = z.strictObject({ tasks: z.array(OrchestratorTask) });
+
+export const RetryResult = z.strictObject({
+  retried: z.number().int().nonnegative(),
+  still_failed: z.number().int().nonnegative(),
+});

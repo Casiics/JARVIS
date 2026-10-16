@@ -112,6 +112,37 @@ class ReelDesk:
             self._save()
             return submission, True
 
+    def retry_failed(self) -> list[ReelSubmission]:
+        """Queue every failed reel again, as a new task, as far as the open-reel cap allows.
+
+        The new submission replaces the failed one in the desk's list; the old task stays in
+        the orchestrator's history. Returns the new submissions, oldest reel first.
+        """
+        with self._lock:
+            failed = sorted(
+                (s for s in self._items.values() if s.status is ReelStatus.FAILED),
+                key=lambda s: s.submitted_at,
+            )
+            open_now = sum(s.status in _OPEN for s in self._items.values())
+            retried: list[ReelSubmission] = []
+            for old in failed:
+                if open_now >= MAX_OPEN:
+                    break
+                record = self._orchestrator.submit(ReelGoal(source_ref=old.source_ref))
+                new = ReelSubmission(
+                    task_id=record.task_id,
+                    source_ref=old.source_ref,
+                    submitted_at=record.created_at,
+                    updated_at=record.created_at,
+                )
+                del self._items[old.task_id]
+                self._items[new.task_id] = new
+                retried.append(new)
+                open_now += 1
+            if retried:
+                self._save()
+            return retried
+
     def sync(self) -> None:
         """Pull the latest task states from the orchestrator."""
         self._orchestrator.tick()

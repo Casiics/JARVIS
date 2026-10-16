@@ -15,9 +15,10 @@ environment. Here it does neither:
 - In production the command is prefixed with the sandbox runner (read-only root, no network
   but the endpoint), set through `command`.
 
-Hermes Agent wants a large context window (64k according to its quickstart); the local
-models in decision 4 run at 8k. Until a larger GPU or a cloud route exists for a domain,
-`GatewayRuntime` stays the default and this runtime is opt-in per domain.
+Hermes Agent wants a large context window (64k according to its quickstart). Its turns
+therefore route as `ModelClass.AGENT`, which runs locally on Hermes 3 (Llama 3.1 8B, native
+128k) loaded with a 64k window; see `jarvis_core.router.catalog`. The turn's own model class
+is ignored here: Hermes' system prompt alone would not fit the 8k models.
 """
 
 from __future__ import annotations
@@ -47,7 +48,7 @@ from jarvis_core.agents.runtime import (
     check_scope,
 )
 from jarvis_core.contracts.classification import Domain
-from jarvis_core.router.catalog import ModelClass
+from jarvis_core.router.catalog import LOCAL_MODELS, ModelClass, local_context
 from jarvis_core.router.client import ChatMessage, ModelClientError
 from jarvis_core.router.gateway import InferenceGateway
 from jarvis_core.router.policy import RoutingDenied
@@ -117,6 +118,7 @@ class ScopedModelEndpoint:
     model_class: ModelClass
     require_local: bool = False
     max_calls: int = 12
+    context_length: int = 65536
     api_key: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     usage: _Usage = field(default_factory=_Usage)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -172,7 +174,16 @@ class ScopedModelEndpoint:
                 elif self.path.rstrip("/") == "/v1/models":
                     self._json(
                         HTTPStatus.OK,
-                        {"object": "list", "data": [{"id": MODEL_ALIAS, "object": "model"}]},
+                        {
+                            "object": "list",
+                            "data": [
+                                {
+                                    "id": MODEL_ALIAS,
+                                    "object": "model",
+                                    "context_length": endpoint.context_length,
+                                }
+                            ],
+                        },
                     )
                 else:
                     self._json(HTTPStatus.NOT_FOUND, {"error": {"message": "not found"}})
@@ -280,6 +291,7 @@ class HermesRuntime:
     gateway: InferenceGateway
     domain: Domain
     command: Sequence[str] = ("hermes",)
+    model_class: ModelClass = ModelClass.AGENT
     timeout_s: float = 600.0
     require_local: bool = False
     max_calls_per_turn: int = 12
@@ -290,9 +302,10 @@ class HermesRuntime:
             gateway=self.gateway,
             domain=self.domain,
             scope=scope,
-            model_class=turn.model_class,
+            model_class=self.model_class,
             require_local=self.require_local,
             max_calls=self.max_calls_per_turn,
+            context_length=local_context(LOCAL_MODELS[self.model_class].name),
         )
         prompt = f"{turn.system}\n\n{turn.prompt}"
         if turn.json_schema is not None:
