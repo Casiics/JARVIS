@@ -6,6 +6,10 @@
     uv run python -m mod_content.curation --data-dir ~/jarvis-data/content decide <id> accept
     uv run python -m mod_content.curation --data-dir ~/jarvis-data/content context
     uv run python -m mod_content.curation --data-dir ~/jarvis-data/content report
+    uv run python -m mod_content.curation --data-dir ~/jarvis-data/content search "qqq breakout"
+    uv run python -m mod_content.curation --data-dir ~/jarvis-data/content export
+
+Notes dropped into <data-dir>/curation/inbox/ (.md or .txt) are collected like reels.
 
 The data directory is the reel pipeline's: runs.jsonl is read, curation/ is written. Curation
 keeps its own audit chain (curation/audit.jsonl) so it can run next to `reel serve`, which
@@ -19,14 +23,17 @@ import json
 import os
 import sys
 import time
+from itertools import chain
 from pathlib import Path
 
 from jarvis_core.audit.chain import AuditChainError, AuditWriter, verify_chain
 from jarvis_core.curation.config import load_config
 from jarvis_core.curation.models import Outcome
 from jarvis_core.curation.pipeline import CurationPipeline, ReviewNotFound
+from jarvis_core.curation.retrieval import render_pack, search
 from jarvis_core.curation.store import FileCurationStore, open_reviews
 from mod_content.curation.deck import DeckReviews, review_mailbox
+from mod_content.curation.notes import note_items
 from mod_content.curation.sources import reel_items
 from mod_content.reel.store import FileAuditStore
 
@@ -59,6 +66,13 @@ def main(argv: list[str] | None = None) -> int:
     context = sub.add_parser("context", help="show curated context")
     context.add_argument("--category")
     sub.add_parser("report", help="counts per stage and category, audit chain state")
+    find = sub.add_parser("search", help="find curated entries for a question")
+    find.add_argument("query")
+    find.add_argument("--category")
+    find.add_argument("-k", type=int, default=5)
+    export = sub.add_parser("export", help="write a context pack for agents (Markdown)")
+    export.add_argument("--category")
+    export.add_argument("--max-chars", type=int, default=8000)
 
     args = parser.parse_args(argv)
     data: Path = args.data_dir
@@ -70,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
         return _context(store, args.category)
     if args.command == "report":
         return _report(store, root)
+    if args.command == "search":
+        return _search(store, args.query, args.category, args.k)
+    if args.command == "export":
+        return _export(store, root, args.category, args.max_chars)
 
     pipeline = CurationPipeline(
         config=load_config(args.categories),
@@ -84,10 +102,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.boundary_dir
         else None
     )
+    last_seen: tuple[tuple[str, int, int], ...] | None = None
     while True:
-        counts = pipeline.run(reel_items(data / "runs.jsonl"))
-        if counts.collected or counts.rejected or not args.watch:
-            print(counts.model_dump_json(), flush=True)
+        seen = _inputs_signature(data / "runs.jsonl", root / "inbox")
+        if seen != last_seen:  # a full pass only when a reel finished or a note changed
+            counts = pipeline.run(
+                chain(reel_items(data / "runs.jsonl"), note_items(root / "inbox"))
+            )
+            last_seen = seen
+            if counts.collected or counts.rejected or not args.watch:
+                print(counts.model_dump_json(), flush=True)
         if deck is not None:
             synced = deck.sync()
             if synced.sent or synced.applied or synced.not_sendable:
@@ -95,6 +119,41 @@ def main(argv: list[str] | None = None) -> int:
         if not args.watch:
             return 0
         time.sleep(args.poll_seconds)
+
+
+def _inputs_signature(*paths: Path) -> tuple[tuple[str, int, int], ...]:
+    files: list[Path] = []
+    for path in paths:
+        if path.is_file():
+            files.append(path)
+        elif path.is_dir():
+            files.extend(p for p in path.iterdir() if p.is_file())
+    out = []
+    for file in sorted(files):
+        st = file.stat()
+        out.append((str(file), st.st_mtime_ns, st.st_size))
+    return tuple(out)
+
+
+def _search(store: FileCurationStore, query: str, category: str | None, k: int) -> int:
+    hits = search(store.entries(category), query, k=k)
+    if not hits:
+        print("no matching context")
+    for hit in hits:
+        e = hit.entry
+        print(f"{hit.score:.2f}  [{e.category}] {e.title}")
+        for fact in e.facts[:5]:
+            print(f"   - {fact}")
+    return 0
+
+
+def _export(store: FileCurationStore, root: Path, category: str | None, max_chars: int) -> int:
+    pack = render_pack(store.entries(category), domain="content", max_chars=max_chars)
+    out = root / "packs" / f"{category or 'all'}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pack, encoding="utf-8")
+    print(out)
+    return 0
 
 
 def _review(store: FileCurationStore) -> int:

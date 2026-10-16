@@ -22,6 +22,27 @@ uv run python -m mod_content.curation --data-dir ~/jarvis-data/content run --wat
 `discarded`, `review`. Only reels that finished (`done` or `awaiting_approval`) are collected;
 escalated runs have no artifact and are skipped.
 
+`--watch` re-runs the stages only when `runs.jsonl` or the notes inbox changed.
+
+## Notes inbox (test without reels)
+
+Drop `.md` or `.txt` files into `<data-dir>/curation/inbox/`; the next pass collects them like
+reels. First line is the title, `- ` lines become facts, `#hashtags` become tags, an optional
+`signal: 0.8` line sets usefulness (default 0.6). Editing a note collects a new version, which
+is merged into the existing entry or discarded as already known.
+
+```bash
+mkdir -p ~/jarvis-data/content/curation/inbox
+cat > ~/jarvis-data/content/curation/inbox/ripgrep.md <<'NOTE'
+Search code with ripgrep
+signal: 0.9
+ripgrep is a faster grep for large repositories. #cli
+- Install ripgrep
+- Replace grep -r with rg in scripts
+NOTE
+uv run python -m mod_content.curation --data-dir ~/jarvis-data/content run
+```
+
 ## Review what the pipeline was not sure about
 
 ```bash
@@ -60,6 +81,16 @@ uv run python -m mod_content.curation --data-dir ~/jarvis-data/content report
 
 `report` shows counts per outcome and category and whether `curation/audit.jsonl` is intact.
 
+```bash
+uv run python -m mod_content.curation --data-dir ~/jarvis-data/content search "qqq breakout"
+uv run python -m mod_content.curation --data-dir ~/jarvis-data/content export --category market-notes
+```
+
+`search` ranks entries by how much of the question they cover. `export` writes a Markdown
+context pack to `curation/packs/<category>.md` for an agent's context window: strongest entries
+first, capped by `--max-chars`, headed by a line that marks everything as data, not
+instructions.
+
 ## Categories
 
 Categories are configuration: `modules/mod-content/mod_content/curation/categories.yaml`, or
@@ -75,6 +106,8 @@ media are the noisiest material.
 | `curation/items.jsonl` | stage 1, every collected item |
 | `curation/decisions.jsonl` | stages 3 and 4, every brief with its outcome; reviews append |
 | `curation/context/<category>.jsonl` | the curated context, one entry per topic, versioned |
+| `curation/inbox/` | your notes (stage 1 source) |
+| `curation/packs/` | exported context packs |
 | `curation/audit.jsonl` | hash chain of every stage (ids and hashes only) |
 
 Curation keeps its own audit chain because `reel serve` holds the head of `audit.jsonl` in
