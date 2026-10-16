@@ -164,6 +164,17 @@ Missing or unknown labels are treated as `PRIVATE`. Anything originating in the 
 4. A quarantined worker without tools builds a `ReelKnowledgeArtifact`; Tier 0b validates it. It carries the `external_content` taint.
 5. Depending on its category it becomes a content template, or a proposal in the trading or private inbox. Skill candidates go to core's self-improvement flow as a PR.
 
+### 6.2a Context curation (every domain, starting with content)
+
+What enters a domain's long-term context passes four deterministic stages (`jarvis_core.curation`), run by each domain on its own data:
+
+1. **Collect**: domain sources yield `CollectedItem`s with origin domain, classification (missing means `PRIVATE`) and taint. Items from another domain or labelled `SECRET` are refused; known items are skipped.
+2. **Consolidate**: exact duplicates (same content hash or source) and near duplicates (token similarity) are clustered and merged into one `Digest`; facts and sources are unioned.
+3. **Prepare**: the digest gets a category from the domain's YAML configuration, is compared with that category's stored entries and receives a `DecisionBrief`: store, merge or discard, with confidence and reasons.
+4. **Decide**: plain code applies the brief. Confident proposals are stored or merged automatically, weak ones discarded; flagged, over-classified or uncertain ones wait for the owner's review.
+
+No stage calls a model. Every stage writes ids and hashes to the audit chain. Curated entries stay in the domain's own store; nothing is shared across domains. See `docs/runbooks/context-curation.md`.
+
 ### 6.3 Trading idea to order
 
 1. A proposal lands in the trading inbox; trading decides whether to pursue it.
