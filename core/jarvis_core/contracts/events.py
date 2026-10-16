@@ -65,13 +65,16 @@ class TaskMetadata(BoundaryEvent):
 class ReelSubmitted(BoundaryEvent):
     """Core asks content to process one reel the owner submitted in the deck.
 
-    Carries only the canonical reel reference and the task id under which content reports
-    progress back as TaskMetadata. Never carries the reel's content.
+    Carries only the canonical reel reference, the task id under which content reports
+    progress back as TaskMetadata, and the signed task token. Never carries the reel's content.
     """
 
     kind: Literal["reel_submitted"] = "reel_submitted"
     task_id: UUID
     source_ref: str = Field(max_length=200)
+    # Ed25519 task token from core's task router, scoped to this task. The worker checks it
+    # with core's public key; it cannot mint tokens of its own.
+    task_token: str | None = Field(default=None, max_length=4096)
 
     @field_validator("source_ref")
     @classmethod

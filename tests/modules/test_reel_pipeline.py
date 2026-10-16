@@ -18,7 +18,7 @@ from jarvis_core.audit.chain import (
 from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import BoundaryEvent, Taint, TaskMetadata, TradingIdeaProposed
-from jarvis_core.contracts.task_token import TaskTokenError, issue_token
+from jarvis_core.contracts.task_token import HmacTokenVerifier, TaskTokenError, issue_token
 from jarvis_core.orchestrator.state_machine import TaskState
 from jarvis_core.router.budget import CircuitBreaker, InMemorySpendLedger
 from jarvis_core.router.catalog import Endpoint, ModelClass
@@ -62,7 +62,7 @@ class Harness:
             runner=self.runner,
             gateway=self.gateway,
             audit=self.sink,
-            token_key=KEY,
+            tokens=HmacTokenVerifier(KEY),
             work_root=tmp_path / "work",
             whisper=WhisperConfig(models_dir=tmp_path / "models"),
             outbox=self.outbox.append,

@@ -27,8 +27,9 @@ from jarvis_core.audit.chain import AuditStore, AuditWriter, InMemoryAuditStore
 from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditLogEntry
 from jarvis_core.contracts.classification import Domain
-from jarvis_core.orchestrator.service import Orchestrator, run_forever
-from jarvis_core.secrets.provider import UnpackedSopsProvider
+from jarvis_core.contracts.task_token import load_signing_key, public_key_hex
+from jarvis_core.orchestrator.service import Orchestrator, TaskTokenIssuer, run_forever
+from jarvis_core.secrets.provider import SecretAccessError, UnpackedSopsProvider
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -77,6 +78,7 @@ def main(argv: list[str] | None = None) -> None:
         clock=clock,
         audit=audit,
         telemetry=telemetry.publish,
+        tokens=_task_tokens(secrets),
     )
     deps = GatewayDeps(
         credentials=FileCredentialStore(args.data_dir / "credentials.json"),
@@ -98,6 +100,17 @@ def main(argv: list[str] | None = None) -> None:
         clock=lambda: datetime.now(UTC),
     )
     uvicorn.run(create_app(settings, deps), host=args.host, port=args.port, proxy_headers=True)
+
+
+def _task_tokens(secrets: UnpackedSopsProvider) -> TaskTokenIssuer | None:
+    """The task router's signing key. Without it, workers refuse every dispatched task."""
+    try:
+        key = load_signing_key(secrets.get("core/task_token_signing_key"))
+    except SecretAccessError:
+        print("warning: no core/task_token_signing_key, workers will refuse dispatched tasks")
+        return None
+    print(f"task-token public key: {public_key_hex(key)}")
+    return TaskTokenIssuer(key)
 
 
 def _audit_store(dsn: str | None) -> AuditStore:

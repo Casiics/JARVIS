@@ -54,8 +54,11 @@ On the deck's **Content** page, paste a reel link (Instagram: Share → Copy lin
 ```bash
 # The worker for deck submissions; same options as ingest. --boundary-dir must match the
 # API gateway's (default /var/lib/jarvis/boundary).
-uv run python -m mod_content.reel serve
+uv run python -m mod_content.reel serve \
+    --task-public-key "$(uv run python -m jarvis_core.orchestrator public-key)"
 ```
+
+Every `ReelSubmitted` carries an Ed25519 task token from core's task router, scoped to that task, the content domain and the reel tools, valid until the task's deadline. The worker checks it with core's public key (`--task-public-key` or `JARVIS_TASK_PUBLIC_KEY`) and reports `task_token_missing`, `task_token_invalid` or `task_token_mismatch` instead of running anything else. The private key (`core/task_token_signing_key`) never leaves core; the worker cannot mint tokens.
 
 For the local deck trial (`scripts/deck-local.sh`), `scripts/reel-worker-local.sh` does all of this in one go: it builds both images with Docker (cached, and always current after a `git pull`), starts `egress-reel`, and runs the worker on the deck's mailbox with `--show-sandbox-errors`.
 
@@ -65,10 +68,12 @@ On one host, the gateway and the worker share `/var/lib/jarvis/boundary`. With s
 
 ### From the command line
 
+Without core: `ingest` mints its own task tokens with an ephemeral in-process key and therefore needs `--self-issue-tokens`. Use the deck for anything beyond a workstation trial.
+
 
 ```bash
-uv run python -m mod_content.reel ingest https://www.instagram.com/reel/<code>/
-uv run python -m mod_content.reel ingest --from-file reels.txt     # one URL per line, # comments
+uv run python -m mod_content.reel ingest --self-issue-tokens https://www.instagram.com/reel/<code>/
+uv run python -m mod_content.reel ingest --self-issue-tokens --from-file reels.txt   # one URL per line
 uv run python -m mod_content.reel report
 ```
 

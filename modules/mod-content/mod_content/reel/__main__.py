@@ -5,9 +5,13 @@
     uv run python -m mod_content.reel report
     uv run python -m mod_content.reel serve      # reels submitted in the deck
 
-Until the Telegram trigger in n8n-content and the core task router run as services
-(Phase 4), this command plays both roles locally: it issues a short-lived task token with an
-ephemeral key that never leaves the process, so every step is still scoped by a token.
+`serve` runs only tasks core's task router dispatched: each ReelSubmitted carries an Ed25519
+task token, checked with core's public key (`--task-public-key` or JARVIS_TASK_PUBLIC_KEY,
+printed by `python -m jarvis_core.orchestrator public-key`). The worker cannot mint tokens.
+
+`ingest` is the stand-alone workstation path without core. It mints its own short-lived
+tokens with an ephemeral key that never leaves the process, and therefore needs the explicit
+`--self-issue-tokens`.
 """
 
 from __future__ import annotations
@@ -28,7 +32,14 @@ from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import BoundaryEvent, ReelSubmitted, Taint, TaskMetadata
 from jarvis_core.contracts.reel_url import InvalidReelUrl, canonical_reel_url
-from jarvis_core.contracts.task_token import issue_token
+from jarvis_core.contracts.task_token import (
+    Ed25519TokenVerifier,
+    HmacTokenVerifier,
+    TaskTokenError,
+    TaskTokenVerifier,
+    issue_token,
+    load_verify_key,
+)
 from jarvis_core.orchestrator.state_machine import TaskState
 from jarvis_core.router.budget import CircuitBreaker, InMemorySpendLedger
 from jarvis_core.router.client import OllamaClient
@@ -54,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     ingest = sub.add_parser("ingest", help="process one or more reel URLs")
     ingest.add_argument("urls", nargs="*")
     ingest.add_argument("--from-file", type=Path)
+    ingest.add_argument(
+        "--self-issue-tokens",
+        action="store_true",
+        help="run without core: mint task tokens with an ephemeral in-process key",
+    )
     _pipeline_options(ingest)
 
     serve = sub.add_parser("serve", help="process reels submitted in the deck")
@@ -62,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path("/var/lib/jarvis/boundary"),
         help="mailboxes shared with core (same as the API gateway's --boundary-dir)",
+    )
+    serve.add_argument(
+        "--task-public-key",
+        default=os.environ.get("JARVIS_TASK_PUBLIC_KEY"),
+        help="core's task-token public key (hex); reels without a valid core token are refused",
     )
     serve.add_argument("--poll-seconds", type=float, default=5.0)
     serve.add_argument("--once", action="store_true", help="handle waiting reels, then exit")
@@ -129,8 +150,16 @@ def _ingest(args: argparse.Namespace, data: Path) -> int:
             failures += 1
     if not valid:
         return 1
+    if not args.self_issue_tokens:
+        print(
+            "ingest runs without core's task router and would mint its own task tokens; "
+            "pass --self-issue-tokens to accept that, or submit reels in the deck",
+            file=sys.stderr,
+        )
+        return 2
 
-    pipeline, key = _build(args, data)
+    key = secrets.token_bytes(32)
+    pipeline = _build(args, data, HmacTokenVerifier(key))
     store = JsonlReelStore(data / "runs.jsonl")
     for url in valid:
         record = pipeline.run(url, _token(key, uuid4()))
@@ -146,9 +175,12 @@ def _ingest(args: argparse.Namespace, data: Path) -> int:
 
 
 def _build(
-    args: argparse.Namespace, data: Path, mailbox: Mailbox | None = None
-) -> tuple[ReelPipeline, bytes]:
-    """The pipeline and its ephemeral token key. With a mailbox, status goes back to core."""
+    args: argparse.Namespace,
+    data: Path,
+    tokens: TaskTokenVerifier,
+    mailbox: Mailbox | None = None,
+) -> ReelPipeline:
+    """The pipeline, checking task tokens with `tokens`. With a mailbox, status goes to core."""
     if shutil.which(args.engine) is None:
         raise SystemExit(
             f"{args.engine} not found: the reel worker runs its sandboxes with it "
@@ -173,7 +205,6 @@ def _build(
         actor="spiffe://jarvis.home/core/model-router",
     )
     runner = SubprocessSandboxRunner(engine)
-    key = secrets.token_bytes(32)
     outbox_file = data / "outbox.jsonl"
 
     def outbox(event: BoundaryEvent) -> None:
@@ -189,14 +220,14 @@ def _build(
         runner=runner,
         gateway=gateway,
         audit=audit,
-        token_key=key,
+        tokens=tokens,
         work_root=data / "work",
         whisper=WhisperConfig(models_dir=args.whisper_models, model=args.whisper_model),
         images=SandboxImages(media=args.media_image, whisper=args.whisper_image),
         outbox=outbox,
         keep_media=args.keep_media,
     )
-    return pipeline, key
+    return pipeline
 
 
 def _token(key: bytes, task_id: UUID) -> str:
@@ -212,15 +243,24 @@ def _token(key: bytes, task_id: UUID) -> str:
 
 
 def _serve(args: argparse.Namespace, data: Path) -> int:
+    if not args.task_public_key:
+        raise SystemExit(
+            "serve needs core's task-token public key: --task-public-key or "
+            "JARVIS_TASK_PUBLIC_KEY (python -m jarvis_core.orchestrator public-key prints it)"
+        )
+    try:
+        verifier = Ed25519TokenVerifier(load_verify_key(args.task_public_key))
+    except TaskTokenError as exc:
+        raise SystemExit(str(exc)) from exc
     mailbox = Mailbox(args.boundary_dir, Domain.CONTENT)
-    pipeline, key = _build(args, data, mailbox)
+    pipeline = _build(args, data, verifier, mailbox)
     store = JsonlReelStore(data / "runs.jsonl")
     print(f"waiting for reels in {args.boundary_dir}", flush=True)
     while True:
         for letter in mailbox.receive(Domain.CORE):
             event = letter.event
             if isinstance(event, ReelSubmitted):
-                _handle(mailbox, pipeline, store, key, event)
+                _handle(mailbox, pipeline, store, verifier, event)
             mailbox.ack(letter)
         if args.once:
             return 0
@@ -231,7 +271,7 @@ def _handle(
     mailbox: Mailbox,
     pipeline: ReelPipeline,
     store: JsonlReelStore,
-    key: bytes,
+    verifier: TaskTokenVerifier,
     event: ReelSubmitted,
 ) -> None:
     started = time.monotonic()
@@ -249,9 +289,27 @@ def _handle(
             )
         )
 
+    # Only core's task router may start work here: the token must verify with core's public
+    # key and name exactly this task in this domain. The pipeline checks it again per step.
+    token = event.task_token
+    if token is None:
+        print(f"{event.task_id}: refused (no task token)", file=sys.stderr, flush=True)
+        report(TaskState.ESCALATED.value, "task_token_missing")
+        return
+    try:
+        claims = verifier.verify(token)
+    except TaskTokenError as exc:
+        print(f"{event.task_id}: refused ({exc})", file=sys.stderr, flush=True)
+        report(TaskState.ESCALATED.value, "task_token_invalid")
+        return
+    if claims.task_id != event.task_id or claims.domain is not Domain.CONTENT:
+        print(f"{event.task_id}: refused (token for another task)", file=sys.stderr, flush=True)
+        report(TaskState.ESCALATED.value, "task_token_mismatch")
+        return
+
     report(TaskState.RUNNING.value)
     try:
-        record = pipeline.run(event.source_ref, _token(key, event.task_id))
+        record = pipeline.run(event.source_ref, token)
     except Exception as exc:
         print(f"{event.task_id}: failed ({type(exc).__name__})", file=sys.stderr, flush=True)
         report(TaskState.ESCALATED.value, "internal_error")
