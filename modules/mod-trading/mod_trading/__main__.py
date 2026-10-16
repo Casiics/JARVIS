@@ -4,6 +4,7 @@
     python -m mod_trading paper --bars today.csv --instrument SPY     # persistent paper account
     python -m mod_trading paper-live --instrument SPY                 # live bars through n8n
     python -m mod_trading history --instrument SPY --out spy-daily.csv  # daily bars, backtests
+    python -m mod_trading research-gate --bars spy-daily.csv --signal idea.csv --instrument SPY
     python -m mod_trading status
     python -m mod_trading kill-switch status|engage REASON|release
     python -m mod_trading ideas
@@ -45,6 +46,13 @@ from mod_trading.feed import read_bars, replay
 from mod_trading.inbox import TradingInbox
 from mod_trading.marketdata import BarRecorder, LiveFeed, MarketDataError, McpBarSource
 from mod_trading.metrics import Performance, bars_per_year, buy_and_hold, performance
+from mod_trading.research import (
+    ResearchGate,
+    SignalError,
+    baseline_weights,
+    read_signal,
+    weight_curve,
+)
 from mod_trading.session import SessionReport, run_session
 from mod_trading.strategies import SmaCrossover, Strategy, TrendVolTarget
 from trading_risk import KillSwitch, RiskEngine, RiskLimits
@@ -159,7 +167,55 @@ def session(args: argparse.Namespace, *, persistent: bool) -> int:
                 "buy_and_hold": performance(held, per_year),
             }
         )
+        if args.strategy == "trend-vol":
+            # The same decisions as compounding weights on the instrument, without the
+            # account's absolute limits: what the signal itself is worth.
+            weights = baseline_weights(mine, **_baseline_params(args, per_year))
+            print("signal on the instrument (compounding, no account limits):")
+            print_comparison(
+                {
+                    strategy.name: performance(weight_curve(mine, weights, float(cost)), per_year),
+                    "buy_and_hold": performance(
+                        weight_curve(mine, [1.0] * len(mine), float(cost)), per_year
+                    ),
+                }
+            )
     return 0
+
+
+def _baseline_params(args: argparse.Namespace, per_year: int) -> dict[str, object]:
+    return {
+        "trend": args.trend,
+        "vol_window": args.vol_window,
+        "target_vol": args.target_vol,
+        "bars_per_year": args.bars_per_year or per_year,
+    }
+
+
+def research_gate(args: argparse.Namespace) -> int:
+    bars = [b for b in read_bars(args.bars) if b.instrument == args.instrument]
+    per_year = bars_per_year(bars)
+    try:
+        candidate = read_signal(args.signal, bars)
+        baseline = baseline_weights(bars, **_baseline_params(args, per_year))
+        verdict = ResearchGate(bars_per_year=per_year).evaluate(bars, candidate, baseline)
+    except SignalError as exc:
+        print(f"signal refused: {exc}", file=sys.stderr)
+        return 2
+    print_comparison(
+        {
+            "candidate": verdict.candidate,
+            "baseline": verdict.baseline,
+            "candidate (2nd half)": verdict.candidate_oos,
+            "baseline (2nd half)": verdict.baseline_oos,
+        }
+    )
+    if verdict.accepted:
+        print("accepted: eligible for paper trading")
+        return 0
+    for reason in verdict.reasons:
+        print(f"rejected: {reason}")
+    return 1
 
 
 def print_comparison(rows: dict[str, Performance]) -> None:
@@ -346,6 +402,14 @@ def main(argv: list[str] | None = None) -> int:
         run.add_argument("--step", type=Decimal, default=Decimal(1))
         run.add_argument("--cash", type=Decimal, default=Decimal(10_000))
         run.add_argument("--spread-bps", type=Decimal, default=Decimal(4))
+    gate = sub.add_parser("research-gate", help="does a signal beat the trend-vol baseline?")
+    gate.add_argument("--bars", type=Path, required=True)
+    gate.add_argument("--signal", type=Path, required=True, help="CSV: ts,weight per bar")
+    gate.add_argument("--instrument", required=True)
+    gate.add_argument("--trend", type=int, default=200)
+    gate.add_argument("--vol-window", type=int, default=20)
+    gate.add_argument("--target-vol", type=float, default=0.10)
+    gate.add_argument("--bars-per-year", type=int, default=None)
     history = sub.add_parser("history")
     history.add_argument("--instrument", required=True)
     history.add_argument("--out", type=Path, required=True)
@@ -370,6 +434,8 @@ def main(argv: list[str] | None = None) -> int:
         return live(args)
     if args.command == "history":
         return history_csv(args)
+    if args.command == "research-gate":
+        return research_gate(args)
     data = args.data_dir
     if args.command == "kill-switch":
         switch = KillSwitch(data / "killswitch")
