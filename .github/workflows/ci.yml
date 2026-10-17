@@ -73,6 +73,7 @@ jobs:
       - name: Proxy configurations parse
         run: |
           docker run --rm --entrypoint envoy -v $PWD/docker/mcp-gateway/envoy.yaml:/e.yaml:ro \
+            -v $PWD/docker/mcp-gateway/sds:/etc/envoy/sds:ro \
             envoyproxy/envoy:v1.37.2 --mode validate -c /e.yaml
           docker run --rm --entrypoint /usr/sbin/squid \
             -v $PWD/docker/egress/squid.conf:/etc/jarvis/squid.conf:ro \
