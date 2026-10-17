@@ -43,7 +43,13 @@ from mod_trading.broker import PaperBroker
 from mod_trading.executor import TRADING_TOOLS, OrderExecutor
 from mod_trading.feed import read_bars, replay
 from mod_trading.inbox import TradingInbox
-from mod_trading.marketdata import BarRecorder, LiveFeed, MarketDataError, McpBarSource
+from mod_trading.marketdata import (
+    BarRecorder,
+    LiveFeed,
+    MarketDataError,
+    McpBarSource,
+    workload_post,
+)
 from mod_trading.metrics import Performance, bars_per_year, buy_and_hold, performance
 from mod_trading.research import (
     ResearchGate,
@@ -239,7 +245,7 @@ def live(args: argparse.Namespace) -> int:
         return 3
     executor, strategy = built
     feed = LiveFeed(
-        source=McpBarSource(args.mcp_url),
+        source=McpBarSource(args.mcp_url, workload_post(args.cert_dir)),
         instrument=args.instrument,
         spread_bps=args.spread_bps,
         poll_s=args.poll_s,
@@ -263,7 +269,9 @@ def live(args: argparse.Namespace) -> int:
 
 def history_csv(args: argparse.Namespace) -> int:
     try:
-        bars = McpBarSource(args.mcp_url).daily(args.instrument, datetime.now(UTC))
+        bars = McpBarSource(args.mcp_url, workload_post(args.cert_dir)).daily(
+            args.instrument, datetime.now(UTC)
+        )
     except MarketDataError as exc:
         print(f"market data: {exc}", file=sys.stderr)
         return 1
@@ -353,8 +361,14 @@ def main(argv: list[str] | None = None) -> int:
             run.add_argument(
                 "--mcp-url",
                 default=os.environ.get(
-                    "JARVIS_MARKETDATA_MCP", "http://mcp-gateway-trading:8080/mcp/marketdata"
+                    "JARVIS_MARKETDATA_MCP", "https://mcp-gateway-trading:8443/mcp/marketdata"
                 ),
+            )
+            run.add_argument(
+                "--cert-dir",
+                type=Path,
+                default=Path(os.environ.get("JARVIS_WORKLOAD_CERTS", "/certs")),
+                help="workload certificate for the gateway (tls.crt, tls.key, root_ca.crt)",
             )
             run.add_argument("--poll-s", type=float, default=60.0)
             run.add_argument("--once", action="store_true", help="poll once, then stop")
@@ -401,8 +415,14 @@ def main(argv: list[str] | None = None) -> int:
     history.add_argument(
         "--mcp-url",
         default=os.environ.get(
-            "JARVIS_MARKETDATA_MCP", "http://mcp-gateway-trading:8080/mcp/marketdata"
+            "JARVIS_MARKETDATA_MCP", "https://mcp-gateway-trading:8443/mcp/marketdata"
         ),
+    )
+    history.add_argument(
+        "--cert-dir",
+        type=Path,
+        default=Path(os.environ.get("JARVIS_WORKLOAD_CERTS", "/certs")),
+        help="workload certificate for the gateway (tls.crt, tls.key, root_ca.crt)",
     )
     sub.add_parser("status")
     sub.add_parser("ideas")

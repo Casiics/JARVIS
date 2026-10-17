@@ -14,11 +14,11 @@ still forming is never returned.
 from __future__ import annotations
 
 import csv
+import http.client
 import json
 import re
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,6 +28,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from jarvis_core.workload import WorkloadConnection, WorkloadTlsError
 from mod_trading.feed import quote_from_bar
 from mod_trading.schemas import Bar, Quote
 
@@ -153,19 +154,42 @@ class HttpResponse:
 Post = Callable[[str, bytes, dict[str, str]], HttpResponse]
 
 
-def _urllib_post(url: str, body: bytes, headers: dict[str, str]) -> HttpResponse:
-    # No proxy: the gateway sits on the domain's internal network.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")  # noqa: S310
-    try:
-        with opener.open(request, timeout=30) as resp:
-            payload = resp.read(MAX_RESPONSE_BYTES + 1)
-            headers = {k.lower(): v for k, v in resp.headers.items()}
-            return HttpResponse(resp.status, headers, payload)
-    except urllib.error.HTTPError as exc:
-        return HttpResponse(exc.code, {}, b"")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise MarketDataError("market data gateway unreachable") from exc
+GATEWAY_ID = "spiffe://jarvis.home/trading/mcp-gateway"
+
+
+def workload_post(cert_dir: Path, peer: str = GATEWAY_ID) -> Post:
+    """POST over mutual TLS with this service's workload certificate (jarvis_core.workload).
+
+    The gateway sits on the domain's internal network, so no proxy is used, and it must
+    present the trading gateway's SPIFFE ID. The certificate is read again for every request,
+    so a renewal by pki-issue takes effect without a restart.
+    """
+
+    def post(url: str, body: bytes, headers: dict[str, str]) -> HttpResponse:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname:
+            raise MarketDataError("market data gateway must be an https URL")
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        try:
+            conn = WorkloadConnection(
+                parts.hostname, parts.port or 443, cert_dir=cert_dir, peer=peer
+            )
+            try:
+                conn.request("POST", path, body=body, headers=headers)
+                resp = conn.getresponse()
+                payload = resp.read(MAX_RESPONSE_BYTES + 1)
+                status, received = resp.status, {k.lower(): v for k, v in resp.getheaders()}
+            finally:
+                conn.close()
+        except WorkloadTlsError as exc:
+            raise MarketDataError(f"market data gateway refused: {exc}") from exc
+        except (http.client.HTTPException, OSError) as exc:
+            raise MarketDataError("market data gateway unreachable") from exc
+        if status != 200:
+            return HttpResponse(status, {}, b"")
+        return HttpResponse(status, received, payload)
+
+    return post
 
 
 def _message(response: HttpResponse, request_id: int) -> dict[str, object]:
@@ -192,7 +216,7 @@ def _message(response: HttpResponse, request_id: int) -> dict[str, object]:
 class McpBarSource:
     """Asks the n8n MCP tool `get_bars` for today's 1-minute bars of one symbol."""
 
-    def __init__(self, url: str, post: Post = _urllib_post) -> None:
+    def __init__(self, url: str, post: Post) -> None:
         self._url = url
         self._post = post
 

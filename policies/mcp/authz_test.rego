@@ -6,12 +6,17 @@ import data.mcp.authz
 
 domain_data := {"domain": "content", "endpoints": ["reel-tools"], "tools": ["store_reel"]}
 
+content_caller := "spiffe://jarvis.home/content/reel-worker"
+
 request(method, path, body) := {
-	"attributes": {"request": {"http": {
-		"method": method,
-		"path": path,
-		"headers": {"content-type": "application/json"},
-	}}},
+	"attributes": {
+		"source": {"principal": content_caller},
+		"request": {"http": {
+			"method": method,
+			"path": path,
+			"headers": {"content-type": "application/json"},
+		}},
+	},
 	"parsed_path": [p | some p in split(trim_prefix(path, "/"), "/")],
 	"parsed_query": {},
 	"parsed_body": body,
@@ -27,8 +32,50 @@ test_listed_tool_is_allowed if {
 	decide(request("POST", "/mcp/reel-tools", call("store_reel"))).allowed
 }
 
-test_allowed_request_is_tagged_with_the_domain if {
-	decide(request("POST", "/mcp/reel-tools", call("store_reel"))).headers["x-jarvis-domain"] == "content"
+test_allowed_request_is_tagged_with_the_domain_and_caller if {
+	headers := decide(request("POST", "/mcp/reel-tools", call("store_reel"))).headers
+	headers["x-jarvis-domain"] == "content"
+	headers["x-jarvis-caller"] == content_caller
+}
+
+as_caller(req, principal) := json.patch(req, [{"op": "replace", "path": "/attributes/source/principal", "value": principal}])
+
+test_caller_without_workload_identity_is_denied if {
+	req := request("POST", "/mcp/reel-tools", call("store_reel"))
+	r := decide(json.patch(req, [{"op": "remove", "path": "/attributes/source"}]))
+	not r.allowed
+	r.http_status == 403
+	not decide(as_caller(req, "")).allowed
+}
+
+test_caller_from_another_domain_is_denied if {
+	req := request("POST", "/mcp/reel-tools", call("store_reel"))
+	every principal in [
+		"spiffe://jarvis.home/trading/executor",
+		"spiffe://jarvis.home/private/assistant",
+		"spiffe://jarvis.home/core/git-gateway",
+	] {
+		not decide(as_caller(req, principal)).allowed
+	}
+}
+
+test_caller_id_must_be_exactly_domain_and_service if {
+	req := request("POST", "/mcp/reel-tools", call("store_reel"))
+	every principal in [
+		"spiffe://jarvis.home/content/",
+		"spiffe://jarvis.home/content/a/b",
+		"spiffe://jarvis.home/content/../trading/executor",
+		"spiffe://other.home/content/reel-worker",
+		"spiffe://jarvis.home/contentx/reel-worker",
+		"CN=reel-worker.content.jarvis.home",
+	] {
+		not decide(as_caller(req, principal)).allowed
+	}
+}
+
+test_get_from_another_domain_is_403 if {
+	r := decide(as_caller(request("GET", "/mcp/reel-tools", null), "spiffe://jarvis.home/trading/executor"))
+	r.http_status == 403
 }
 
 test_unlisted_tool_is_denied if {
