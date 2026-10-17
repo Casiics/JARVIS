@@ -93,3 +93,20 @@ Results: `dispatched` (with the task id), `already_running`, `unclear` (no route
 Domains run their jobs with `jarvis_core.orchestrator.jobs.JobServer`: one handler per job, `running` then the final state reported to core as metadata.
 
 Decisions are written to the shared memory (`<data-dir>/memory/core.jsonl`, topic `delegation`), and lessons (topic `lesson:*`) are read back into the next decision. `jarvis_core.management.memory.MemoryPort` is the interface the context pipeline's memory manager implements.
+
+## Management layer: improvement
+
+The improvement agent runs inside the API process every `--improve-hours` (default 6, `0`
+disables). It reads only the orchestrator's task records (route, state, error class) and:
+
+1. groups escalations by route and error class; two or more of the same kind are a pattern;
+2. asks the local model (Hermes when installed) for one short lesson per pattern with new
+   evidence; Tier 0b refuses links, secrets and the wrong route, the local supervisor reviews;
+3. stores the lesson in shared memory (`<data-dir>/memory/core.jsonl`, topic
+   `lesson:<route>:<error_class>`), where the delegation agent reads it before deciding;
+4. with `--skills-repo owner/name`, proposes `skills/<domain>/<route>-lessons/SKILL.md` as a
+   pull request through the git gateway once a route has lessons and three verified runs.
+   Private-domain routes learn lessons but never become skills. A human merges.
+
+Read what it learned: `jq -r 'select(.topic|startswith("lesson:")) | "\(.topic): \(.text)"'
+<data-dir>/memory/core.jsonl`.
