@@ -17,6 +17,7 @@ categories:
     keywords: [earnings, guidance, eps, revenue, drift, iv, crush]
     min_signal: 0.5
     auto_store_at: 0.9
+    max_age_days: 45  # one earnings season
     max_classification: private
   - name: risk
     description: Position sizing, stops, drawdown rules
