@@ -213,7 +213,7 @@ The full concept, including the threat model, lives in the project's Zero-Trust 
 
 ### 7.1 Identity
 
-- Workload identities per domain and role: step-ca issues 24-hour certificates with SPIFFE IDs `spiffe://jarvis.home/<domain>/<service>` into each domain's own volume (decision 12, [`runbooks/audit-hardening.md`](runbooks/audit-hardening.md)). Services do not check them yet; until mTLS is wired in, the domain is fixed per container by configuration and network.
+- Workload identities per domain and role: step-ca issues 24-hour certificates with SPIFFE IDs `spiffe://jarvis.home/<domain>/<service>` into each domain's own volume (decision 12, [`runbooks/audit-hardening.md`](runbooks/audit-hardening.md)). The MCP gateways require them: mutual TLS 1.3, and OPA accepts only callers whose SPIFFE ID is in the gateway's own domain. Other services do not check them yet; there the domain is fixed per container by configuration and network.
 - Signed task tokens scope each worker to one task (`core/jarvis_core/contracts/task_token.py`).
 - Humans sign in to the dashboard with a passkey over Tailscale only. Approvals for orders, publishing, self-modification and new n8n workflows need a fresh passkey confirmation.
 

@@ -15,6 +15,7 @@ import secrets
 import subprocess
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 import yaml
@@ -46,6 +47,16 @@ print('wrote 3')
 """
 
 
+def _subpath(volume: str, subpath: str, target: str) -> dict[str, Any]:
+    return {
+        "type": "volume",
+        "source": volume,
+        "target": target,
+        "read_only": True,
+        "volume": {"subpath": subpath},
+    }
+
+
 def run(stack: Stack, *args: str) -> subprocess.CompletedProcess[str]:
     return stack.compose("run", "--rm", "-T", *args, timeout=300)
 
@@ -72,6 +83,19 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
                         "command": ["sleep", "infinity"],
                         "networks": ["net-trading"],
                         "volumes": [f"{HERE / 'probe.py'}:/probe.py:ro"],
+                    },
+                    # Started after pki-issue: the subpaths exist only then. Real certificates:
+                    # the trading client's, and the content gateway's as a foreign caller.
+                    "probe-mtls": {
+                        "image": PYTHON,
+                        "command": ["sleep", "infinity"],
+                        "networks": ["net-trading"],
+                        "profiles": ["mtls"],
+                        "volumes": [
+                            f"{HERE / 'probe.py'}:/probe.py:ro",
+                            _subpath("certs_trading", "paper", "/certs/ok"),
+                            _subpath("certs_content", "mcp-gateway", "/certs/other-domain"),
+                        ],
                     },
                 }
             }
@@ -192,27 +216,26 @@ def inspect(stack: Stack, domain: str, command: str) -> str:
 
 
 def test_certificates_carry_spiffe_ids_and_live_a_day(pki: Stack) -> None:
-    text = inspect(pki, "trading", "step certificate inspect /c/executor.crt --format json")
+    text = inspect(
+        pki, "trading", "step certificate inspect /c/executor/tls.crt --format json --bundle"
+    )
     certificate = json.loads(text)
     assert "spiffe://jarvis.home/trading/executor" in text
-    assert certificate["validity"]["length"] <= 24 * 3600 + 60  # step-ca backdates 1 min
+    leaf = certificate[0] if isinstance(certificate, list) else certificate
+    assert leaf["validity"]["length"] <= 24 * 3600 + 60  # step-ca backdates 1 min
     verify = inspect(
-        pki, "trading", "step certificate verify /c/executor.crt --roots /c/root_ca.crt && echo ok"
+        pki,
+        "trading",
+        "step certificate verify /c/executor/tls.crt --roots /c/executor/root_ca.crt && echo ok",
     )
     assert verify.strip().endswith("ok")
 
 
 def test_each_domain_volume_holds_only_its_own_identities(pki: Stack) -> None:
     trading = inspect(pki, "trading", "ls /c").split()
-    assert sorted(trading) == sorted(
-        [
-            "executor.crt",
-            "executor.key",
-            "mcp-gateway-trading.crt",
-            "mcp-gateway-trading.key",
-            "root_ca.crt",
-        ]
-    )
+    assert sorted(trading) == ["executor", "mcp-gateway", "paper"]
+    files = inspect(pki, "trading", "ls /c/mcp-gateway").split()
+    assert sorted(files) == ["current", "root_ca.crt", "tls.crt", "tls.key"]
     private = inspect(pki, "private", "ls /c").split()
     assert not any(name.startswith("executor") for name in private)
 
@@ -220,3 +243,50 @@ def test_each_domain_volume_holds_only_its_own_identities(pki: Stack) -> None:
 def test_no_domain_network_reaches_the_ca(pki: Stack) -> None:
     assert not pki.probe("probe-core", "tcp", "pki-ca", "9000")["ok"]
     assert not pki.probe("probe-agent-trading", "tcp", "pki-ca", "9000")["ok"]
+
+
+def test_each_certificate_belongs_to_its_consumer(pki: Stack) -> None:
+    # Envoy runs as 101, the trading client as 10001; nobody else may read the keys.
+    listing = inspect(
+        pki, "trading", "stat -L -c '%n %u %a' /c/mcp-gateway/tls.key /c/paper/tls.key"
+    )
+    assert listing.split("\n")[:2] == [
+        "/c/mcp-gateway/tls.key 101 400",
+        "/c/paper/tls.key 10001 400",
+    ]
+
+
+def _served_serial(stack: Stack) -> str:
+    result = stack.probe("probe-mtls", "serial", "mcp-gateway-trading", "8443")
+    return str(result["serial"])
+
+
+def _as(stack: Stack, certs: str, *args: str) -> dict[str, Any]:
+    proc = subprocess.run(  # noqa: S603
+        ["docker", "exec", "-e", f"PROBE_CERTS={certs}",  # noqa: S607
+         f"{stack.project}-probe-mtls-1", "python", "/probe.py", *args],
+        capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stderr
+    result: dict[str, Any] = json.loads(proc.stdout)
+    return result
+
+
+def test_gateway_uses_issued_certificates_and_reloads_renewals(pki: Stack) -> None:
+    """The real chain: step-ca certificates, subpath mounts, Envoy as uid 101, and OPA."""
+    up = pki.compose(
+        "--profile", "mtls", "up", "-d", "opa-trading", "mcp-gateway-trading", "probe-mtls"
+    )
+    assert up.returncode == 0, up.stderr
+    _wait(lambda: _served_serial(pki) != "", "the trading gateway on mTLS", timeout=120)
+    url = "https://mcp-gateway-trading:8443/mcp/marketdata"
+    ping = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    # Allowed by OPA; n8n-trading is not running, so Envoy answers for the missing upstream.
+    assert _as(pki, "/certs/ok", "http", "POST", url, ping)["status"] == 503
+    assert _as(pki, "/certs/other-domain", "http", "POST", url, ping)["status"] == 403
+    assert _as(pki, "none", "http", "POST", url, ping)["status"] == 0
+    before = _served_serial(pki)
+    renewed = run(pki, "pki-issue")
+    assert renewed.returncode == 0, renewed.stderr
+    _wait(lambda: _served_serial(pki) not in {before, ""}, "the renewed certificate", timeout=60)
+    assert _as(pki, "/certs/ok", "http", "POST", url, ping)["status"] == 503

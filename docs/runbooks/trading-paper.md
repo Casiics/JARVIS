@@ -136,7 +136,7 @@ docker compose -f docker/docker-compose.yml restart opa-trading egress-trading
 
 ### Run
 
-`paper-live` must run where `mcp-gateway-trading` resolves, which is `net-trading`. It polls every 60 s (`--poll-s`); `--once` polls a single time, which is the quickest check that data arrives.
+`paper-live` must run where `mcp-gateway-trading` resolves, which is `net-trading`, with the `trading/paper` workload certificate mounted read-only at `/certs` (volume `certs_trading`, subpath `paper`; see [`audit-hardening.md`](audit-hardening.md), section 3). The gateway speaks only mutual TLS on port 8443. It polls every 60 s (`--poll-s`); `--once` polls a single time, which is the quickest check that data arrives.
 
 ```bash
 python -m mod_trading --data-dir /var/lib/jarvis/trading kill-switch release

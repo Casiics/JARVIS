@@ -70,6 +70,17 @@ docker compose -f docker/docker-compose.yml run --rm pki-issue  # then every 8 h
 
 `pki-init` prints the root fingerprint; store it with the audit public key. `pki-issue` writes a 24-hour certificate with the SPIFFE ID `spiffe://jarvis.home/<domain>/<service>` for each line of `docker/pki/identities` into that domain's own volume (`certs_<domain>`), together with the root certificate. Only `pki-issue` joins `net-pki`; no domain network reaches the CA.
 
+Layout of a domain volume: one directory per identity, `/certs/<domain>/<service>/`, holding `tls.crt` (leaf and intermediate), `tls.key` and `root_ca.crt`. The files belong to the uid in `docker/pki/identities` (Envoy is 101, the trading client 10001; 0 for identities nothing consumes yet), the key is 0400. Each renewal writes a new hidden version directory and swaps the `current` symlink with one rename, so a reader never sees a new certificate with an old key. A consumer mounts only its own directory, read-only, with a volume `subpath`; it cannot see the other identities of its domain. `pki-issue` keeps `CHOWN` to hand the files over and nothing else.
+
+Consumers today:
+
+| Identity | Used by | How |
+|---|---|---|
+| `<domain>/mcp-gateway` (trading, content, private) | `mcp-gateway-<domain>` | Server certificate on port 8443, DNS name `mcp-gateway-<domain>`; requires a client certificate from the same CA with a SPIFFE ID, and OPA requires the caller's domain to be the gateway's. Envoy reloads renewed files on the symlink swap, without a restart |
+| `trading/paper` | `python -m mod_trading paper-live` and `history` | Client certificate from `--cert-dir` (default `JARVIS_WORKLOAD_CERTS` or `/certs`), read again for every request; the gateway must present `spiffe://jarvis.home/trading/mcp-gateway` |
+
+The gateways do not start until `pki-issue` has run once, because their certificate directory does not exist before; that is the intended fail-closed order. After upgrading from the flat layout, run `pki-issue` once: it removes the old `<service>.crt` files.
+
 `pki-ca` keeps one capability, `NET_BIND_SERVICE`: the step-ca binary carries it as a file capability and the kernel refuses to start it otherwise.
 
 ## 4. Skill proposals
@@ -78,7 +89,7 @@ docker compose -f docker/docker-compose.yml run --rm pki-issue  # then every 8 h
 
 ## 5. Open points and residual risks
 
-- **Certificates are issued, not yet used.** No service terminates or checks mTLS yet. Wiring them in (Envoy gateways first) is a follow-up; issued keys are root-owned 0600, so consumers will need matching ownership.
+- **mTLS covers the MCP gateways only.** The gateways and the trading market-data client use their certificates; the audit keeper, the git gateway, the executor and the private assistant still rely on configuration and network for their domain. Their identities are issued (uid 0) so wiring them in needs only a uid and a mount.
 - **New files can call the broker.** The gateway and CODEOWNERS guard `executor.py` and `broker.py`, but a new file in `mod_trading/` could import the broker directly. Human review of every `auto-improve/*` PR covers this; a static import check is a candidate follow-up.
 - **Signing key on the same host.** An attacker with root on the server could read the signing key and re-sign a rewritten chain. The offline public key, the hourly cadence and the offsite WORM copy limit this to entries not yet exported.
 - **Domain chains.** Trading and private keep `audit_signing_key` secrets for their file chains; their keepers are wired when those domains run as services.

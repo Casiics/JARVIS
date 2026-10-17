@@ -331,4 +331,4 @@ def test_assistant_reaches_nothing_else(stack: PrivateStack) -> None:
     # n8n-private's side of the proxy and the n8n network are out of reach.
     assert not stack.probe(probe, "tcp", N8N_PROXY_IP, "443")["ok"]
     assert not stack.probe(probe, "tcp", "n8n-private", "5678")["ok"]
-    assert not stack.probe(probe, "tcp", "mcp-gateway-private", "8080")["ok"]
+    assert not stack.probe(probe, "tcp", "mcp-gateway-private", "8443")["ok"]

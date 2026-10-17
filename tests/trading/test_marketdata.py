@@ -134,7 +134,7 @@ class FakeGateway:
 
 def test_bars_come_from_the_mcp_tool() -> None:
     gateway = FakeGateway({"content": [{"type": "text", "text": raw([500.0, 501.0])}]})
-    bars = McpBarSource("http://mcp-gateway-trading:8080/mcp/marketdata", gateway).bars(
+    bars = McpBarSource("https://mcp-gateway-trading:8443/mcp/marketdata", gateway).bars(
         "SPY", OPEN + timedelta(hours=1)
     )
     assert len(bars) == 2

@@ -191,7 +191,7 @@ services:
     depends_on: [opa-trading]
     volumes:
       - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
-      - ./mcp-gateway/sds.yaml:/etc/envoy/sds.yaml:ro
+      - ./mcp-gateway/sds:/etc/envoy/sds:ro
       # Its own workload certificate only (pki-issue); without it the gateway does not start.
       - type: volume
         source: certs_trading
@@ -260,7 +260,7 @@ services:
     depends_on: [opa-content]
     volumes:
       - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
-      - ./mcp-gateway/sds.yaml:/etc/envoy/sds.yaml:ro
+      - ./mcp-gateway/sds:/etc/envoy/sds:ro
       # Its own workload certificate only (pki-issue); without it the gateway does not start.
       - type: volume
         source: certs_content
@@ -374,7 +374,7 @@ services:
     depends_on: [opa-private]
     volumes:
       - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
-      - ./mcp-gateway/sds.yaml:/etc/envoy/sds.yaml:ro
+      - ./mcp-gateway/sds:/etc/envoy/sds:ro
       # Its own workload certificate only (pki-issue); without it the gateway does not start.
       - type: volume
         source: certs_private

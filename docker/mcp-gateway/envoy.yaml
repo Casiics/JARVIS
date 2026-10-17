@@ -15,6 +15,11 @@
 #   opa:9191           the domain's OPA (Envoy ext_authz gRPC plugin)
 # There is no admin interface.
 
+# File-based SDS (the certificates) needs a node identity; it names nothing outside this file.
+node:
+  id: mcp-gateway
+  cluster: mcp-gateway
+
 overload_manager:
   resource_monitors:
     - name: envoy.resource_monitors.global_downstream_max_connections
@@ -40,7 +45,7 @@ static_resources:
                 tls_certificate_sds_secret_configs:
                   - name: workload
                     sds_config:
-                      path_config_source: { path: /etc/envoy/sds.yaml }
+                      path_config_source: { path: /etc/envoy/sds/workload.yaml }
                       resource_api_version: V3
                 combined_validation_context:
                   default_validation_context:
@@ -50,7 +55,7 @@ static_resources:
                   validation_context_sds_secret_config:
                     name: workload_ca
                     sds_config:
-                      path_config_source: { path: /etc/envoy/sds.yaml }
+                      path_config_source: { path: /etc/envoy/sds/workload_ca.yaml }
                       resource_api_version: V3
           filters:
             - name: envoy.filters.network.http_connection_manager

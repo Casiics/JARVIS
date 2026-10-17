@@ -15,7 +15,16 @@ from collections.abc import Iterator
 import pytest
 import yaml
 
-from tests.isolation.test_isolation_live import COMPOSE, HERE, PYTHON, Stack, _secrets, _wait
+from tests.isolation.test_isolation_live import (
+    COMPOSE,
+    HERE,
+    PYTHON,
+    Stack,
+    _secrets,
+    _wait,
+    gateway_certs,
+    workload_certs,
+)
 
 pytestmark = [
     pytest.mark.docker,
@@ -24,7 +33,7 @@ pytestmark = [
     ),
 ]
 
-URL = "http://mcp-gateway-content:8080/mcp/test"
+URL = "https://mcp-gateway-content:8443/mcp/test"
 
 
 @pytest.fixture(scope="module")
@@ -38,17 +47,22 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         )
     )
     tools.chmod(0o644)
+    workload_certs(tmp / "workload", "content")
     override = tmp / "override.yml"
     override.write_text(
         yaml.safe_dump(
             {
                 "services": {
                     "opa-content": {"volumes": [f"{tools}:/policies/data.json:ro"]},
+                    "mcp-gateway-content": gateway_certs(tmp / "workload", "content"),
                     "probe-agent-content": {
                         "image": PYTHON,
                         "command": ["sleep", "infinity"],
                         "networks": ["net-content"],
-                        "volumes": [f"{HERE / 'probe.py'}:/probe.py:ro"],
+                        "volumes": [
+                            f"{HERE / 'probe.py'}:/probe.py:ro",
+                            f"{tmp / 'workload' / 'agents'}:/certs:ro",
+                        ],
                     },
                 }
             }

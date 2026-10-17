@@ -87,8 +87,24 @@ class WorkloadCa:
         dns: str | None = None,
         expired: bool = False,
         mode: int = 0o644,
+        rotate: bool = False,
     ) -> Path:
-        """Write tls.crt, tls.key and root_ca.crt for spiffe://jarvis.home/<domain>/<service>."""
+        """Write tls.crt, tls.key and root_ca.crt for spiffe://jarvis.home/<domain>/<service>.
+
+        rotate: pki-issue's layout instead, a new version directory behind a `current`
+        symlink that is swapped with one rename, which is what Envoy watches for.
+        """
+        if rotate:
+            directory.mkdir(parents=True, exist_ok=True)
+            version = f".v{len(list(directory.glob('.v*')))}"
+            self.issue(directory / version, domain, service, dns=dns, expired=expired, mode=mode)
+            (directory / version).chmod(0o755)
+            (directory / "current.new").symlink_to(version)
+            (directory / "current.new").replace(directory / "current")
+            for name in ("tls.crt", "tls.key", "root_ca.crt"):
+                if not (directory / name).is_symlink():
+                    (directory / name).symlink_to(f"current/{name}")
+            return directory
         now = dt.datetime.now(dt.UTC)
         start, end = (
             (now - dt.timedelta(hours=26), now - dt.timedelta(hours=2))
