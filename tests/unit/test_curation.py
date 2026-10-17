@@ -223,3 +223,40 @@ def test_config_rejects_unknown_default_and_inverted_thresholds() -> None:
         CurationConfig(domain=Domain.CONTENT, default_category="x", categories=CONFIG.categories)
     with pytest.raises(ValueError, match="auto_discard_below"):
         CategoryRule(name="x", auto_store_at=0.3, auto_discard_below=0.5)
+
+
+def snapshot(n: int, day: int, value: str, subject: str = "stat:spy") -> CollectedItem:
+    summary = f"SPY statistics: {value}"
+    return CollectedItem(
+        item_id=f"stat:{n}",
+        domain=Domain.CONTENT,
+        classification=DataClassification.PUBLIC,
+        source_ref=f"stats:{day}",
+        collected_at=NOW.replace(day=day),
+        title="SPY statistics",
+        summary=summary,
+        facts=(value,),
+        tags=("mod-trading",),
+        signal=0.9,
+        content_hash=fingerprint(summary, value),
+        subject=subject,
+    )
+
+
+def test_snapshots_replace_instead_of_merging(tmp_path: Path) -> None:
+    pipeline, store, _ = make(tmp_path)
+    # Two days arrive together: the newer one wins, the older one counts as superseded.
+    counts = pipeline.run([snapshot(1, 1, "close 500"), snapshot(2, 2, "close 505")])
+    assert (counts.stored, counts.duplicates_dropped) == (1, 1)
+    # A loose item with near-identical text never joins the snapshot cluster.
+    assert pipeline.run([item(9, "SPY statistics: close 505", tags=())]).collected == 1
+
+    counts = pipeline.run([snapshot(3, 3, "close 498")])
+    assert counts.merged == 1
+    (entry,) = [e for e in store.entries("market-notes") if e.subject == "stat:spy"]
+    assert (entry.version, entry.facts, entry.source_refs) == (2, ("close 498",), ("stats:3",))
+
+    counts = pipeline.run([snapshot(4, 4, "close 498")])  # same numbers, next day
+    assert counts.discarded == 1
+    record = store.decisions()[-1]
+    assert record.reason == "unchanged since the stored snapshot"
