@@ -184,6 +184,8 @@ No stage calls a model. Every stage writes ids and hashes to the audit chain. Op
 
 Agents read curated context only as a named work-order input (`jarvis_core.curation.context_input`): the domain selects entries from its own store under a label ceiling, renders them as a pack marked as data, and `with_context` attaches it only if the task token's domain matches, the order's label is at least the strictest included entry, and external-derived context goes to a tainted task token.
 
+The memory steward (`jarvis_core.curation.steward.MemorySteward`) is the management role over this memory, one per domain: `recall` attaches fresh context to a work order, `remember` sends lessons from an accepted run through the four stages (label never below the order's, taint inherited, injection markers force review), and `maintain` reports size, stale entries, open reviews and the audit chain. There is no memory shared across domains.
+
 ### 6.3 Trading idea to order
 
 1. A proposal lands in the trading inbox; trading decides whether to pursue it.
