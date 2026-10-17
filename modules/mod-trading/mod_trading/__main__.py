@@ -52,6 +52,7 @@ from mod_trading.research import (
     read_signal,
     weight_curve,
 )
+from mod_trading.review import AssessmentStore, IdeaReviewer, review_open_ideas
 from mod_trading.session import SessionReport, run_session
 from mod_trading.strategies import SmaCrossover, Strategy, TrendVolTarget
 from trading_risk import KillSwitch, RiskEngine, RiskLimits
@@ -83,6 +84,73 @@ def claims() -> TaskTokenClaims:
         ttl=timedelta(minutes=5),
     )
     return verify_token(key, token)
+
+
+def review_claims() -> TaskTokenClaims:
+    """Ideas are external content: the token is tainted and allows the loop's steps only."""
+    from jarvis_core.contracts.events import Taint
+    from jarvis_core.orchestrator.loop import TOOL_SUPERVISOR, TOOL_WORKER
+
+    key = secrets.token_bytes(32)
+    token = issue_token(
+        key,
+        task_id=uuid4(),
+        domain=Domain.TRADING,
+        allowed_tools=frozenset({TOOL_WORKER, TOOL_SUPERVISOR}),
+        budget_eur=0.0,
+        taint=Taint.EXTERNAL_CONTENT,
+        ttl=timedelta(minutes=30),
+    )
+    return verify_token(key, token)
+
+
+def review_ideas(args: argparse.Namespace) -> int:
+    """Assess open inbox ideas with local agents (Hermes when installed). Never trades."""
+    from jarvis_core.agents.select import RuntimeUnavailable, local_runtime, runtime_name
+    from jarvis_core.orchestrator.loop import (
+        RuntimeSupervisor,
+        RuntimeWorker,
+        SupervisorWorkerLoop,
+    )
+    from jarvis_core.orchestrator.state_machine import TaskMachine
+    from jarvis_core.router.budget import CircuitBreaker, FileSpendLedger
+    from jarvis_core.router.client import OllamaClient
+    from jarvis_core.router.gateway import InferenceGateway
+
+    data: Path = args.data_dir
+    audit = AuditWriter(FileAuditStore(data / "audit.jsonl")).write
+    gateway = InferenceGateway(
+        local=OllamaClient(args.ollama_url),
+        breaker=CircuitBreaker(FileSpendLedger(data / "spend.jsonl")),
+        audit=audit,
+        actor="spiffe://jarvis.home/trading/model-router",
+    )
+    try:
+        runtime = local_runtime(gateway, Domain.TRADING, choice=args.runtime)
+    except RuntimeUnavailable as exc:
+        print(f"runtime unavailable: {exc}", file=sys.stderr)
+        return 2
+    reviewer = IdeaReviewer(
+        loop=SupervisorWorkerLoop(
+            TaskMachine(audit, actor="spiffe://jarvis.home/trading/idea-review")
+        ),
+        worker=RuntimeWorker(runtime),
+        supervisor=RuntimeSupervisor(runtime),
+        claims=review_claims,
+        runtime=runtime_name(runtime),
+    )
+    results = review_open_ideas(
+        TradingInbox(data / "ideas.json"),
+        AssessmentStore(data / "assessments.json"),
+        reviewer,
+        limit=args.limit,
+        again=args.again,
+    )
+    for r in results:
+        verdict = r.assessment.verdict.value if r.assessment else (r.error_class or "-")
+        print(f"{r.idea_id}  {r.state.value:<10} {verdict:<10} tries {r.attempts} ({r.runtime})")
+    print(f"reviewed {len(results)} ideas")
+    return 0
 
 
 def load_limits(path: Path) -> RiskLimits:
@@ -406,6 +474,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("status")
     sub.add_parser("ideas")
+    review = sub.add_parser("review-ideas", help="assess open ideas with local agents")
+    review.add_argument("--runtime", choices=["auto", "hermes", "gateway"], default="auto")
+    review.add_argument(
+        "--ollama-url", default=os.environ.get("JARVIS_OLLAMA_URL", "http://ollama:11434")
+    )
+    review.add_argument("--limit", type=int, default=10)
+    review.add_argument("--again", action="store_true", help="also re-assess reviewed ideas")
     ks = sub.add_parser("kill-switch")
     ks.add_argument("action", choices=["status", "engage", "release"])
     ks.add_argument("reason", nargs="?", default="manual")
@@ -421,6 +496,8 @@ def main(argv: list[str] | None = None) -> int:
         return history_csv(args)
     if args.command == "research-gate":
         return research_gate(args)
+    if args.command == "review-ideas":
+        return review_ideas(args)
     data = args.data_dir
     if args.command == "kill-switch":
         switch = KillSwitch(data / "killswitch")
@@ -441,9 +518,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"kill switch {'engaged' if state.engaged else 'released'} {state.reason}")
         return 0
     if args.command == "ideas":
+        assessed = AssessmentStore(data / "assessments.json").latest()
         for idea in TradingInbox(data / "ideas.json").all():
             if not idea.dismissed:
-                print(f"{idea.idea_id}  [{idea.origin}, {idea.taint}]  {idea.summary[:80]}")
+                seen = assessed.get(idea.idea_id)
+                mark = seen.assessment.verdict.value if seen and seen.assessment else "open"
+                print(f"{idea.idea_id}  [{idea.origin}, {idea.taint}, {mark}]  {idea.summary[:80]}")
         return 0
     return 2
 

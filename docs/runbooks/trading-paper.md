@@ -55,6 +55,8 @@ Limits: edit `modules/mod-trading/risk/limits.json`. It is a protected path, so 
 
 Ideas from the content domain (`TradingIdeaProposed`) enter through the boundary policy and keep their taint (`mod_trading.inbox`). `python -m mod_trading ideas` lists them. They are notes for review and have no path to the executor.
 
+`python -m mod_trading review-ideas` assesses open ideas with local agents through core's supervisor-worker loop: a worker writes a typed assessment (`research`, `watch` or `dismiss`, the instruments, a rationale and risks), Tier 0b checks it deterministically (only tickers the idea itself names, a research verdict needs an instrument), and a local supervisor does the QA, at most four tries per idea. Hermes Agent is the runtime when the `hermes` binary is installed (`--runtime auto`, the default); otherwise plain gateway completions run the same loop. Both use local models only. Assessments land in `assessments.json` next to the inbox, and `ideas` shows each idea's latest verdict. The token is tainted and allows the loop's two steps only, so a review can never place an order or dismiss an idea; the owner decides.
+
 ## Baseline strategy: trend filter plus volatility target
 
 `--strategy trend-vol` (`mod_trading.strategies.TrendVolTarget`) is the rule-based baseline every later strategy has to beat. Long only, one instrument:
