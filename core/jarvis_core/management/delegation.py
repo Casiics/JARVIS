@@ -23,6 +23,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jarvis_core.agents.runtime import AgentRuntime
 from jarvis_core.agents.select import RuntimeChoice, local_runtime
 from jarvis_core.contracts.audit import AuditLogEntry
 from jarvis_core.contracts.classification import DataClassification, Domain
@@ -255,13 +256,9 @@ def build_delegation(
     reels: Callable[[str], UUID] | None = None,
 ) -> DelegationAgent:
     """The delegation agent as core runs it: local models only, Hermes when installed."""
-    gateway = InferenceGateway(
-        local=OllamaClient(ollama_url),
-        breaker=CircuitBreaker(FileSpendLedger(data_dir / "management-spend.jsonl")),
-        audit=audit,
-        actor="spiffe://jarvis.home/core/management",
+    runtime = management_runtime(
+        data_dir=data_dir, ollama_url=ollama_url, audit=audit, choice=runtime_choice
     )
-    runtime = local_runtime(gateway, Domain.CORE, choice=runtime_choice)
     return DelegationAgent(
         orchestrator=orchestrator,
         loop=SupervisorWorkerLoop(TaskMachine(audit, actor="spiffe://jarvis.home/core/delegation")),
@@ -271,6 +268,19 @@ def build_delegation(
         memory=JsonlMemory(data_dir / "memory"),
         reels=reels,
     )
+
+
+def management_runtime(
+    *, data_dir: Path, ollama_url: str, audit: AuditSink, choice: RuntimeChoice = "auto"
+) -> AgentRuntime:
+    """The runtime every management agent shares: local models, one spend ledger."""
+    gateway = InferenceGateway(
+        local=OllamaClient(ollama_url),
+        breaker=CircuitBreaker(FileSpendLedger(data_dir / "management-spend.jsonl")),
+        audit=audit,
+        actor="spiffe://jarvis.home/core/management",
+    )
+    return local_runtime(gateway, Domain.CORE, choice=choice)
 
 
 def management_claims() -> TaskTokenClaims:

@@ -87,11 +87,15 @@ def render(skill: SkillProposal) -> str:
     )
 
 
+def looks_like_secret(text: str) -> bool:
+    return any(p.search(text) for p in _SECRET_PATTERNS)
+
+
 def check(skill: SkillProposal) -> None:
     if skill.domain is Domain.PRIVATE:
         raise SkillRejected("private-domain skills stay local; they are never proposed to git")
     text = f"{skill.description}\n{skill.body}"
-    if any(p.search(text) for p in _SECRET_PATTERNS):
+    if looks_like_secret(text):
         raise SkillRejected("the skill contains something that looks like a secret")
     if any(ch in text for ch in ("\x00", "\x1b")):
         raise SkillRejected("control characters are not allowed")
