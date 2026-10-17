@@ -28,6 +28,7 @@ from jarvis_core.contracts.events import (
     ContextReviewRequested,
     LifeTipProposed,
     ReelSubmitted,
+    TaskAssigned,
     TaskMetadata,
     TradingIdeaProposed,
 )
@@ -39,7 +40,8 @@ AnyEvent = Annotated[
     | TradingIdeaProposed
     | LifeTipProposed
     | ContextReviewRequested
-    | ContextReviewDecided,
+    | ContextReviewDecided
+    | TaskAssigned,
     Field(discriminator="kind"),
 ]
 _EVENT: TypeAdapter[AnyEvent] = TypeAdapter(AnyEvent)

@@ -7,7 +7,14 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.reel_url import canonical_reel_url
@@ -79,6 +86,43 @@ class ReelSubmitted(BoundaryEvent):
         if canonical_reel_url(value) != value:
             raise ValueError("source_ref must be a canonical reel URL")
         return value
+
+
+class Job(StrEnum):
+    """The predefined jobs core may start in a domain. A name, never a prompt or parameters.
+
+    Each job belongs to exactly one domain (`JOB_DOMAIN`); the domain decides how to run it
+    and keeps every input and output to itself.
+    """
+
+    PRIVATE_DAILY_BRIEFING = "private.daily_briefing"
+    TRADING_PAPER_CHECK = "trading.paper_check"
+
+
+JOB_DOMAIN: dict[Job, Domain] = {
+    Job.PRIVATE_DAILY_BRIEFING: Domain.PRIVATE,
+    Job.TRADING_PAPER_CHECK: Domain.TRADING,
+}
+
+
+class TaskAssigned(BoundaryEvent):
+    """Core asks a domain to run one of its predefined jobs.
+
+    Carries the job's name, the task id under which the domain reports back as TaskMetadata,
+    and (once core signs tokens) the task token. No content travels in either direction: the
+    domain reads its own data and answers with metadata only.
+    """
+
+    kind: Literal["task_assigned"] = "task_assigned"
+    task_id: UUID
+    job: Job
+    task_token: str | None = Field(default=None, max_length=4096)
+
+    @model_validator(mode="after")
+    def _job_matches_domain(self) -> TaskAssigned:
+        if JOB_DOMAIN[self.job] is not self.target_domain:
+            raise ValueError(f"job {self.job.value} does not run in {self.target_domain.value}")
+        return self
 
 
 BriefId = Annotated[str, StringConstraints(pattern=r"^br:[0-9a-f]{24}$")]
