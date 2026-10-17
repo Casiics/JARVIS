@@ -119,7 +119,7 @@ pack labelled above the order, and reel-derived (external) context for an untain
 
 ```python
 steward = MemorySteward(pipeline, audit_file=FileAuditStore(root / "audit.jsonl"))
-order = steward.recall(order, "QQQ earnings gaps")      # before the run
+order = steward.recall(order, "QQQ earnings gaps")  # before the run
 steward.remember(order, [Lesson(title=..., summary=..., facts=(...), tags=("qqq",))])  # after
 steward.maintain()  # entries and stale entries per category, open reviews, audit chain
 ```
