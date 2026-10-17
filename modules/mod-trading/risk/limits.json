@@ -1,5 +1,5 @@
 {
-  "instruments": ["SPY", "QQQ", "VWCE.DE", "BTC-EUR", "ETH-EUR"],
+  "instruments": ["SPY", "QQQ", "IWM", "VWCE.DE", "BTC-EUR", "ETH-EUR"],
   "max_order_notional": "1000",
   "max_position_notional": "2500",
   "max_gross_exposure": "8000",

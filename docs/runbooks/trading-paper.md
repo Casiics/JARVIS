@@ -111,7 +111,7 @@ python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument
 - **Correlation decides what a basket is worth.** SPY and QQQ typically correlate around 0.9 on daily returns, so two sleeves of them are closer to one bet than to two. IWM (small caps) diversifies more, but less than one might hope in a crash, when correlations rise together.
 - **Order rate:** `max_orders_per_minute` is per account and members trade on the same minute, so they share it (three a minute: one per member of a three-member basket). A larger rebalance then takes a few bars. A basket larger than the order rate is refused.
 - **Exposure:** three sleeves of 2400 make 7200, inside `max_gross_exposure` (8000). Raising `--capital` per sleeve needs the limits raised first, by a human.
-- **IWM is not on the risk engine's instrument allowlist** (`modules/mod-trading/risk/limits.json`, a protected path). Backtests with `--compare` and the research gate show IWM's signal, but no IWM orders are proposed (`IWM: not on the risk allowlist, no orders`) until a human adds it there; a basket including IWM trades only SPY and QQQ meanwhile.
+- **Allowlist:** SPY, QQQ and IWM are on the risk engine's instrument list (`modules/mod-trading/risk/limits.json`, a protected path; IWM added on the owner's decision). An instrument that is not, such as DIA, is still compared by `--compare` and the research gate, but no orders are proposed for it (`DIA: not on the risk allowlist, no orders`).
 
 ## Research gate
 

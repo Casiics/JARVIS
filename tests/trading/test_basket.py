@@ -154,13 +154,30 @@ def test_instruments_off_the_allowlist_are_compared_but_not_traded(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spy = write_csv(tmp_path / "spy.csv", daily(regimes(7)))
-    iwm = write_csv(tmp_path / "iwm.csv", daily([c / 2 for c in regimes(5)], "IWM"))
+    dia = write_csv(tmp_path / "dia.csv", daily([c / 2 for c in regimes(5)], "DIA"))
     code = main(
-        ["backtest", "--bars", str(spy), str(iwm), "--instrument", "SPY,IWM",
+        ["backtest", "--bars", str(spy), str(dia), "--instrument", "SPY,DIA",
          "--strategy", "trend-vol", "--trend", "100", "--compare"]
     )  # fmt: skip
     assert code == 0
     captured = capsys.readouterr()
-    assert "IWM: not on the risk allowlist" in captured.err
-    assert "risk " not in captured.out  # no IWM order was even proposed
-    assert "IWM/trend-vol" in captured.out
+    assert "DIA: not on the risk allowlist" in captured.err
+    assert "risk " not in captured.out  # no DIA order was even proposed
+    assert "DIA/trend-vol" in captured.out
+
+
+def test_spy_qqq_and_iwm_trade_together_inside_the_limits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    paths = [
+        write_csv(tmp_path / f"{name}.csv", daily([c / div for c in regimes(seed)], name))
+        for name, seed, div in (("SPY", 7, 1), ("QQQ", 11, 1.3), ("IWM", 5, 2))
+    ]
+    code = main(
+        ["backtest", "--bars", *map(str, paths), "--instrument", "SPY,QQQ,IWM",
+         "--strategy", "trend-vol", "--trend", "100"]
+    )  # fmt: skip
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "not on the risk allowlist" not in captured.err
+    assert "risk " not in captured.out  # three sleeves of 2400 stay under 8000 gross
