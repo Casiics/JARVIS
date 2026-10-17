@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from jarvis_core.contracts.events import Taint
-from jarvis_core.curation.models import ContextEntry
+from jarvis_core.curation.models import ContextEntry, CurationConfig
 from jarvis_core.curation.similarity import overlap, tokens
 
 PACK_HEADER = (
@@ -23,6 +24,22 @@ PACK_HEADER = (
 class Hit:
     score: float
     entry: ContextEntry
+
+
+def fresh(
+    entries: Sequence[ContextEntry], config: CurationConfig, now: datetime
+) -> list[ContextEntry]:
+    """Entries within their category's `max_age_days`. Stale ones stay in the store.
+
+    Age counts from the last update, so a merge or a new snapshot keeps an entry current.
+    Entries of a category no longer configured are kept: removing a category is not ageing.
+    """
+    limits = {c.name: c.max_age_days for c in config.categories if c.max_age_days}
+    return [
+        e
+        for e in entries
+        if e.category not in limits or now - e.updated_at <= timedelta(days=limits[e.category])
+    ]
 
 
 def search(

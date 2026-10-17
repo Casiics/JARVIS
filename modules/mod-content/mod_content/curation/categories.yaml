@@ -23,6 +23,8 @@ categories:
     # Trading claims from social media are the noisiest material: keep a human in the loop longer.
     min_signal: 0.4
     auto_store_at: 0.85
+    # Market claims go stale fast: older notes stay stored but leave search and packs.
+    max_age_days: 30
   - name: life
     description: Habits, health and productivity tips (public tips, never personal data)
     tags: [mod-life-os]

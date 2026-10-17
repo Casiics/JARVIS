@@ -13,14 +13,15 @@ import sys
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from jarvis_core.audit.chain import AuditChainError, AuditWriter, verify_chain
 from jarvis_core.audit.file import FileAuditStore
 from jarvis_core.curation.config import load_config
-from jarvis_core.curation.models import CollectedItem, Outcome
+from jarvis_core.curation.models import CollectedItem, ContextEntry, Outcome
 from jarvis_core.curation.pipeline import CurationPipeline, ReviewNotFound
-from jarvis_core.curation.retrieval import render_pack, search
+from jarvis_core.curation.retrieval import fresh, render_pack, search
 from jarvis_core.curation.store import FileCurationStore, open_reviews
 
 Bridge = Callable[[], dict[str, int]]
@@ -69,9 +70,11 @@ def run_cli(cli: DomainCli, argv: list[str] | None = None) -> int:
     find.add_argument("query")
     find.add_argument("--category")
     find.add_argument("-k", type=int, default=5)
+    find.add_argument("--include-stale", action="store_true", help="ignore max_age_days")
     export = sub.add_parser("export", help="write a context pack for agents (Markdown)")
     export.add_argument("--category")
     export.add_argument("--max-chars", type=int, default=8000)
+    export.add_argument("--include-stale", action="store_true", help="ignore max_age_days")
 
     args = parser.parse_args(argv)
     data: Path = args.data_dir
@@ -83,10 +86,13 @@ def run_cli(cli: DomainCli, argv: list[str] | None = None) -> int:
         return _context(store, args.category)
     if args.command == "report":
         return _report(store, root)
-    if args.command == "search":
-        return _search(store, args.query, args.category, args.k)
-    if args.command == "export":
-        return _export(store, root, cli.domain, args.category, args.max_chars)
+    if args.command in ("search", "export"):
+        entries = store.entries(args.category)
+        if not args.include_stale:
+            entries = fresh(entries, load_config(args.categories), datetime.now(UTC))
+        if args.command == "search":
+            return _search(entries, args.query, args.k)
+        return _export(entries, root, cli.domain, args.category, args.max_chars)
 
     root.mkdir(parents=True, exist_ok=True)
     pipeline = CurationPipeline(
@@ -139,8 +145,8 @@ def inputs_signature(*paths: Path) -> tuple[tuple[str, int, int], ...]:
     return tuple(out)
 
 
-def _search(store: FileCurationStore, query: str, category: str | None, k: int) -> int:
-    hits = search(store.entries(category), query, k=k)
+def _search(entries: list[ContextEntry], query: str, k: int) -> int:
+    hits = search(entries, query, k=k)
     if not hits:
         print("no matching context")
     for hit in hits:
@@ -152,9 +158,9 @@ def _search(store: FileCurationStore, query: str, category: str | None, k: int) 
 
 
 def _export(
-    store: FileCurationStore, root: Path, domain: str, category: str | None, max_chars: int
+    entries: list[ContextEntry], root: Path, domain: str, category: str | None, max_chars: int
 ) -> int:
-    pack = render_pack(store.entries(category), domain=domain, max_chars=max_chars)
+    pack = render_pack(entries, domain=domain, max_chars=max_chars)
     out = root / "packs" / f"{category or 'all'}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pack, encoding="utf-8")

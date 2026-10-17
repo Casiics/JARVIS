@@ -121,6 +121,12 @@ your own file with `--categories`. Per category you set tags (count double), key
 `market-notes` category stores automatically only at 0.85, because trading claims from social
 media are the noisiest material.
 
+`max_age_days` ages a category: entries not updated for that long stay in the store but no longer
+appear in `search`, `export` or agent packs (`--include-stale` shows them anyway). A merge or a
+new snapshot counts as an update. Shipped: content `market-notes` 30 days, trading `earnings` 45 and `market-regime` 7.
+Agent runs get the same filter with `fresh(store.entries(), config, now)` before
+`select_context`.
+
 ## Files
 
 | File | Content |

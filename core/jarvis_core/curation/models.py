@@ -145,6 +145,11 @@ class CategoryRule(BaseModel):
     auto_store_at: float = Field(default=0.7, ge=0.0, le=1.0)
     auto_discard_below: float = Field(default=0.35, ge=0.0, le=1.0)
     max_classification: DataClassification = DataClassification.INTERNAL
+    max_age_days: int | None = Field(
+        default=None,
+        ge=1,
+        description="entries not updated for this long stay stored but leave search and packs",
+    )
 
     @model_validator(mode="after")
     def _ordered(self) -> CategoryRule:
