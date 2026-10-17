@@ -23,6 +23,12 @@ uv run python -m mod_content.curation --data-dir ~/jarvis-data/content run --wat
 escalated runs have no artifact and are skipped.
 
 `--watch` re-runs the stages only when `runs.jsonl` or the notes inbox changed.
+A pass that fails (for example on a half-written file) is reported on stderr as an error class
+only and retried at the next poll; the watcher keeps running.
+
+For the local deck trial, `scripts/curation-local.sh` starts the watcher in a third terminal next
+to `scripts/deck-local.sh` and `scripts/reel-worker-local.sh`: each finished reel and each new
+note is curated within seconds, and reviews show up in the deck.
 
 ## Notes inbox (test without reels)
 
