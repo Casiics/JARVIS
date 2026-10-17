@@ -337,30 +337,63 @@ class LiveFeed:
         try:
             history = self.source.bars(self.instrument, self.clock())
         except MarketDataError as exc:
-            self.on_error(str(exc))
+            self.on_error(f"{self.instrument}: {exc}")
             return []
         if history:
             self.last = history[-1].ts
         return history
 
+    def poll(self) -> list[tuple[Bar, Quote]]:
+        """One request: the bars that closed since the last one, oldest first."""
+        try:
+            bars = self.source.bars(self.instrument, self.clock())
+        except MarketDataError as exc:
+            self.on_error(f"{self.instrument}: {exc}")
+            return []
+        fresh: list[tuple[Bar, Quote]] = []
+        for bar in bars:
+            if self.last is not None and bar.ts <= self.last:
+                continue
+            self.last = bar.ts
+            self.record(bar)
+            fresh.append((bar, quote_from_bar(bar, self.spread_bps)))
+        return fresh
+
     def stream(self) -> Iterator[tuple[Bar, Quote]]:
-        polls = 0
-        while self.max_polls is None or polls < self.max_polls:
-            polls += 1
-            try:
-                bars = self.source.bars(self.instrument, self.clock())
-            except MarketDataError as exc:
-                self.on_error(str(exc))
-                bars = []
-            for bar in bars:
-                if self.last is not None and bar.ts <= self.last:
-                    continue
-                self.last = bar.ts
-                self.record(bar)
-                yield bar, quote_from_bar(bar, self.spread_bps)
-            if self.max_polls is not None and polls >= self.max_polls:
-                return
-            try:
-                self.sleep(self.poll_s)
-            except KeyboardInterrupt:
-                return
+        return _poll_loop([self], self.poll_s, self.sleep, self.max_polls)
+
+
+@dataclass
+class BasketFeed:
+    """Several live feeds polled in turn; each round's new bars are yielded in time order."""
+
+    feeds: Sequence[LiveFeed]
+    poll_s: float = 60.0
+    sleep: Callable[[float], None] = time.sleep
+    max_polls: int | None = None
+
+    def warmup(self) -> list[Bar]:
+        return [bar for feed in self.feeds for bar in feed.warmup()]
+
+    def stream(self) -> Iterator[tuple[Bar, Quote]]:
+        return _poll_loop(self.feeds, self.poll_s, self.sleep, self.max_polls)
+
+
+def _poll_loop(
+    feeds: Sequence[LiveFeed],
+    poll_s: float,
+    sleep: Callable[[float], None],
+    max_polls: int | None,
+) -> Iterator[tuple[Bar, Quote]]:
+    polls = 0
+    while max_polls is None or polls < max_polls:
+        polls += 1
+        fresh = [item for feed in feeds for item in feed.poll()]
+        fresh.sort(key=lambda item: (item[0].ts, item[0].instrument))
+        yield from fresh
+        if max_polls is not None and polls >= max_polls:
+            return
+        try:
+            sleep(poll_s)
+        except KeyboardInterrupt:
+            return

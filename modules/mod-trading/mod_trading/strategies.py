@@ -7,7 +7,9 @@ from __future__ import annotations
 import itertools
 import math
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import Protocol
 
@@ -91,6 +93,9 @@ class TrendVolTarget:
     which keeps it inside the risk limits it trades under (an order the limits refuse would
     still be refused; this only avoids proposing it). Leave `capital` a little below the
     position limit, since fills happen at the ask, not at the close.
+
+    `cap`, when set, is asked on every bar for the highest weight allowed now
+    (`mod_trading.brakes`); the strategy holds `min(weight, cap)`. A cap can only lower it.
     """
 
     instrument: str
@@ -104,6 +109,7 @@ class TrendVolTarget:
     max_orders_per_bar: int = 3
     quantity_step: Decimal = Decimal(1)
     bars_per_year: int = 252
+    cap: Callable[[str, datetime], float] | None = None
     name: str = "trend_vol_target"
     _closes: deque[Decimal] = field(init=False)
 
@@ -135,6 +141,8 @@ class TrendVolTarget:
         weight = self.target_weight()
         if weight is None:
             return []
+        if self.cap is not None:
+            weight = min(weight, max(0.0, self.cap(self.instrument, bar.ts)))
         price = bar.close
         held = account.positions.get(self.instrument, Decimal(0))
         target = (self.capital * Decimal(str(weight)) / price).quantize(
@@ -166,3 +174,24 @@ class TrendVolTarget:
             )
             remaining -= quantity
         return intents
+
+
+@dataclass
+class Basket:
+    """One strategy per instrument, each trading its own sleeve.
+
+    A bar goes only to the member for its instrument, so the members never see each other's
+    data and each sizes against its own `capital`. Together they stay subject to the account's
+    gross exposure limit like any other orders.
+    """
+
+    members: dict[str, Strategy]
+    name: str = "basket"
+
+    def __post_init__(self) -> None:
+        if not self.members:
+            raise ValueError("a basket needs at least one member")
+
+    def on_bar(self, bar: Bar, account: AccountView) -> list[OrderIntent]:
+        member = self.members.get(bar.instrument)
+        return member.on_bar(bar, account) if member else []

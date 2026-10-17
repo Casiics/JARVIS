@@ -5,6 +5,14 @@
 domain: trading
 default_category: general
 categories:
+  - name: market-regime
+    description: Computed daily regime snapshots of QQQ, SPY and IWM (replaced, never merged)
+    tags: [regime]
+    keywords: [regime, volatility, trend, average]
+    min_signal: 0.5
+    auto_store_at: 0.85
+    max_age_days: 7  # a snapshot older than a week means the bars stopped updating
+    max_classification: private
   - name: index-etf
     description: QQQ, SPY, IWM and index strategies
     tags: [qqq, spy, iwm]
@@ -17,6 +25,7 @@ categories:
     keywords: [earnings, guidance, eps, revenue, drift, iv, crush]
     min_signal: 0.5
     auto_store_at: 0.9
+    max_age_days: 45  # one earnings season
     max_classification: private
   - name: risk
     description: Position sizing, stops, drawdown rules

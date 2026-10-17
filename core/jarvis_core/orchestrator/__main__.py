@@ -1,10 +1,15 @@
-"""Read-only view of the orchestrator's tasks for the terminal.
+"""Read-only view of the orchestrator's tasks for the terminal, and the task router's key.
 
     uv run python -m jarvis_core.orchestrator --data-dir /var/lib/jarvis/core/deck status
     uv run python -m jarvis_core.orchestrator --data-dir … status --json
+    uv run python -m jarvis_core.orchestrator public-key [--secrets-root /run/jarvis/secrets]
 
 Reads `tasks.json` as the API gateway writes it; it never sends or acknowledges events, so it
 is safe to run next to the running gateway.
+
+`public-key` prints the public half of core's `task_token_signing_key` (32-byte Ed25519 seed,
+hex), which never leaves core. Workers get only this public key (`--task-public-key` /
+JARVIS_TASK_PUBLIC_KEY).
 """
 
 from __future__ import annotations
@@ -17,7 +22,10 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from jarvis_core.contracts.classification import Domain
+from jarvis_core.contracts.task_token import load_signing_key, public_key_hex
 from jarvis_core.orchestrator.service import TaskRecord
+from jarvis_core.secrets.provider import UnpackedSopsProvider
 
 _RECORDS = TypeAdapter(list[TaskRecord])
 
@@ -38,7 +46,14 @@ def main(argv: list[str] | None = None) -> int:
     status = sub.add_parser("status", help="list tasks and counts per state")
     status.add_argument("--json", action="store_true")
     status.add_argument("--limit", type=int, default=20)
+    show = sub.add_parser("public-key", help="print the task-token public key (hex)")
+    show.add_argument("--secrets-root", type=Path, default=Path("/run/jarvis/secrets"))
     args = parser.parse_args(argv)
+
+    if args.cmd == "public-key":
+        provider = UnpackedSopsProvider(Domain.CORE, root=args.secrets_root)
+        print(public_key_hex(load_signing_key(provider.get("core/task_token_signing_key"))))
+        return 0
 
     path = args.data_dir / "tasks.json"
     tasks = _RECORDS.validate_json(path.read_bytes()) if path.exists() else []

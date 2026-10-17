@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from jarvis_core.contracts.events import Taint
-from jarvis_core.curation.models import ContextEntry
+from jarvis_core.curation.models import ContextEntry, CurationConfig
 from jarvis_core.curation.similarity import overlap, tokens
 
 PACK_HEADER = (
@@ -23,6 +24,22 @@ PACK_HEADER = (
 class Hit:
     score: float
     entry: ContextEntry
+
+
+def fresh(
+    entries: Sequence[ContextEntry], config: CurationConfig, now: datetime
+) -> list[ContextEntry]:
+    """Entries within their category's `max_age_days`. Stale ones stay in the store.
+
+    Age counts from the last update, so a merge or a new snapshot keeps an entry current.
+    Entries of a category no longer configured are kept: removing a category is not ageing.
+    """
+    limits = {c.name: c.max_age_days for c in config.categories if c.max_age_days}
+    return [
+        e
+        for e in entries
+        if e.category not in limits or now - e.updated_at <= timedelta(days=limits[e.category])
+    ]
 
 
 def search(
@@ -48,11 +65,19 @@ def search(
 
 def render_pack(entries: Sequence[ContextEntry], *, domain: str, max_chars: int = 8000) -> str:
     """Markdown for an agent's context window, strongest entries first, cut at `max_chars`."""
+    return build_pack(entries, domain=domain, max_chars=max_chars)[0]
+
+
+def build_pack(
+    entries: Sequence[ContextEntry], *, domain: str, max_chars: int = 8000
+) -> tuple[str, list[ContextEntry]]:
+    """The rendered pack plus the entries that fit into it, in rendered order."""
     ranked = sorted(
         entries, key=lambda e: (-e.signal, -len(e.source_refs), -e.updated_at.timestamp())
     )
     parts = [PACK_HEADER.format(domain=domain), ""]
     used = sum(len(p) + 1 for p in parts)
+    included: list[ContextEntry] = []
     for entry in ranked:
         marker = " [external]" if entry.taint is Taint.EXTERNAL_CONTENT else ""
         block = [f"## [{entry.category}] {entry.title}{marker}", entry.summary]
@@ -62,5 +87,6 @@ def render_pack(entries: Sequence[ContextEntry], *, domain: str, max_chars: int 
         if used + len(text) > max_chars:
             break
         parts.append(text)
+        included.append(entry)
         used += len(text) + 1
-    return "\n".join(parts).rstrip() + "\n"
+    return "\n".join(parts).rstrip() + "\n", included

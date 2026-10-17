@@ -37,6 +37,7 @@ EXPECTED_NETWORKS = {
     "opa-private": {"net-mcp-private"},
     "mcp-gateway-private": {"net-private", "net-mcp-private"},
     "private-assistant": {"net-private-assistant", "net-inference-private"},
+    "trading-paper": {"net-trading"},
     "audit-keeper": {"net-core"},
     "pki-ca": {"net-pki"},
     "pki-init": set(),
@@ -65,7 +66,7 @@ HARDENED = [
     s
     for s in EXPECTED_NETWORKS
     if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-", "pki-", "edge-"))
-    or s in {"private-assistant", "audit-keeper"}
+    or s in {"private-assistant", "audit-keeper", "trading-paper"}
 ]
 
 
@@ -355,3 +356,19 @@ def test_mcp_gateways_require_client_certificates() -> None:
     assert sans["match_typed_subject_alt_names"] == [
         {"san_type": "URI", "matcher": {"prefix": "spiffe://jarvis.home/"}}
     ]
+
+
+def test_trading_paper_presents_its_own_certificate(compose: dict[str, Any]) -> None:
+    service = compose["services"]["trading-paper"]
+    mounts = [v for v in service["volumes"] if isinstance(v, dict)]
+    assert mounts == [
+        {
+            "type": "volume",
+            "source": "certs_trading",
+            "target": "/certs",
+            "read_only": True,
+            "volume": {"subpath": "paper"},
+        }
+    ]
+    uid = str(service["user"]).split(":")[0]
+    assert ["trading", "paper", uid] in _identities()
