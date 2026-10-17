@@ -29,6 +29,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
+from tests.workload_ca import WorkloadCa
+
 pytestmark = [
     pytest.mark.docker,
     pytest.mark.skipif(
@@ -93,6 +95,31 @@ def _certificate(directory: Path) -> None:
         path.chmod(0o644)
 
 
+def workload_certs(directory: Path, agent_domain: str) -> WorkloadCa:
+    """Test stand-ins for pki-issue's output: one gateway certificate per domain under
+    gateways/<domain>, and client certificates for probes under agents/:
+    ok (an agent of agent_domain), other-domain, expired and rogue (another CA)."""
+    ca = WorkloadCa()
+    for domain in ("trading", "content", "private"):
+        gateway = directory / "gateways" / domain
+        ca.issue(gateway, domain, "mcp-gateway", dns=f"mcp-gateway-{domain}", rotate=True)
+    agents = directory / "agents"
+    other = "trading" if agent_domain != "trading" else "content"
+    ca.issue(agents / "ok", agent_domain, "agent")
+    ca.issue(agents / "other-domain", other, "agent")
+    ca.issue(agents / "expired", agent_domain, "agent", expired=True)
+    WorkloadCa("Rogue").issue(agents / "rogue", agent_domain, "agent")
+    for path in [directory, *directory.rglob("*")]:
+        if path.is_dir() and not path.is_symlink():
+            path.chmod(0o755)
+    return ca
+
+
+def gateway_certs(certs: Path, domain: str) -> dict[str, Any]:
+    """Replaces the gateway's volume subpath mount with the test certificate."""
+    return {"volumes": [f"{certs / 'gateways' / domain}:/certs:ro"]}
+
+
 def _secrets(directory: Path) -> None:
     compose = yaml.safe_load(COMPOSE.read_text())
     for secret in compose["secrets"].values():
@@ -112,22 +139,28 @@ def _fake(script: Path, certs: Path, aliases: list[str], name: str, *ports: str)
     }
 
 
-def _probe(networks: list[str], extra_hosts: list[str] | None = None) -> dict[str, Any]:
+def _probe(
+    networks: list[str], extra_hosts: list[str] | None = None, certs: Path | None = None
+) -> dict[str, Any]:
     service: dict[str, Any] = {
         "image": PYTHON,
         "command": ["sleep", "infinity"],
         "networks": networks,
         "volumes": [f"{HERE / 'probe.py'}:/probe.py:ro"],
     }
+    if certs is not None:
+        service["volumes"].append(f"{certs / 'agents'}:/certs:ro")
     if extra_hosts:
         service["extra_hosts"] = extra_hosts
     return service
 
 
-def _override(tmp: Path) -> Path:
+def _override(tmp: Path) -> tuple[Path, WorkloadCa]:
     certs = tmp / "certs"
     certs.mkdir()
     _certificate(certs)
+    workload = tmp / "workload"
+    ca = workload_certs(workload, "content")
     tools = tmp / "content-tools.json"
     tools.write_text(
         json.dumps(
@@ -146,6 +179,8 @@ def _override(tmp: Path) -> Path:
     override = {
         "services": {
             "opa-content": {"volumes": [f"{tools}:/policies/data.json:ro"]},
+            "mcp-gateway-content": gateway_certs(workload, "content"),
+            "mcp-gateway-trading": gateway_certs(workload, "trading"),
             "fake-telegram": _fake(fakes, certs, ["api.telegram.org"], "telegram", "443"),
             "fake-other": _fake(fakes, certs, ["evil.jarvis.test"], "other", "443"),
             "fake-instagram": _fake(
@@ -164,7 +199,7 @@ def _override(tmp: Path) -> Path:
                 "networks": {"net-mcp-content": {"aliases": ["mcp-upstream"]}},
                 "volumes": [f"{fakes}:/fakes.py:ro"],
             },
-            "probe-agent-content": _probe(["net-content"]),
+            "probe-agent-content": _probe(["net-content"], certs=workload),
             "probe-n8n-content": _probe(["net-mcp-content"]),
             "probe-sandbox": _probe(["net-sandbox-egress"]),
             "probe-n8n-private": _probe(["net-mcp-private"], private_hosts),
@@ -174,7 +209,7 @@ def _override(tmp: Path) -> Path:
     }
     path = tmp / "compose.override.yml"
     path.write_text(yaml.safe_dump(override))
-    return path
+    return path, ca
 
 
 class Stack:
@@ -182,6 +217,7 @@ class Stack:
         self.project = project
         self.files = files
         self.env = env
+        self.workload: tuple[Path, WorkloadCa] | None = None  # see workload_certs
 
     def compose(self, *args: str, timeout: int = 600) -> subprocess.CompletedProcess[str]:
         cmd = ["docker", "compose", "-p", self.project]
@@ -241,14 +277,16 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         "JARVIS_IMAP_HOST": IMAP,
     }
     project = f"jarvis-iso-{uuid.uuid4().hex[:8]}"
-    stack = Stack(project, [COMPOSE, _override(tmp)], env)
+    override, ca = _override(tmp)
+    stack = Stack(project, [COMPOSE, override], env)
+    stack.workload = (tmp / "workload", ca)
     try:
         up = stack.compose("up", "-d", *SERVICES)
         assert up.returncode == 0, up.stderr
 
         def gateway_ready() -> bool:
             body = '{"jsonrpc":"2.0","id":1,"method":"ping"}'
-            url = "http://mcp-gateway-content:8080/mcp/test"
+            url = "https://mcp-gateway-content:8443/mcp/test"
             result = stack.probe("probe-agent-content", "http", "POST", url, body)
             return bool(result["status"] == 200)
 
@@ -342,7 +380,7 @@ def _rpc(method: str, **params: Any) -> str:
     return json.dumps(body)
 
 
-GATEWAY = "http://mcp-gateway-content:8080"
+GATEWAY = "https://mcp-gateway-content:8443"
 
 
 def test_gateway_forwards_listed_tool_with_domain(stack: Stack) -> None:
@@ -378,7 +416,55 @@ def test_agents_cannot_bypass_the_gateway(stack: Stack) -> None:
     assert not stack.probe(probe, "tcp", "mcp-upstream", "5678")["ok"]
     assert not stack.probe(probe, "tcp", "mcp-fake-content", "5678")["ok"]
     assert not stack.probe(probe, "tcp", "opa-content", "9191")["ok"]
-    assert not stack.probe(probe, "tcp", "mcp-gateway-trading", "8080")["ok"]
+    assert not stack.probe(probe, "tcp", "mcp-gateway-trading", "8443")["ok"]
+
+
+def _as(stack: Stack, certs: str, *args: str) -> dict[str, Any]:
+    """The content agent probe with another client certificate (see workload_certs)."""
+    proc = subprocess.run(  # noqa: S603
+        ["docker", "exec", "-e", f"PROBE_CERTS={certs}",  # noqa: S607
+         f"{stack.project}-probe-agent-content-1", "python", "/probe.py", *args],
+        capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    assert proc.returncode == 0, proc.stderr
+    result: dict[str, Any] = json.loads(proc.stdout)
+    return result
+
+
+def test_gateway_requires_a_workload_certificate_of_its_domain(stack: Stack) -> None:
+    url = f"{GATEWAY}/mcp/test"
+    call = _rpc("tools/call", name="allowed_tool", arguments={})
+    assert _as(stack, "/certs/ok", "http", "POST", url, call)["status"] == 200
+    # Envoy refuses the handshake: no certificate, an expired one, or one from another CA.
+    for certs in ("none", "/certs/expired", "/certs/rogue"):
+        assert _as(stack, certs, "http", "POST", url, call)["status"] == 0, certs
+    # A valid certificate of another domain gets through TLS, and OPA refuses it.
+    assert _as(stack, "/certs/other-domain", "http", "POST", url, call)["status"] == 403
+    # Plain HTTP is not spoken at all.
+    assert (
+        stack.probe(
+            "probe-agent-content", "http", "POST", "http://mcp-gateway-content:8443/mcp/test", call
+        )["status"]
+        == 0
+    )
+
+
+def test_gateway_reloads_a_renewed_certificate(stack: Stack) -> None:
+    """pki-issue renews every 8 hours; the gateway must serve the new certificate untouched."""
+    assert stack.workload is not None
+    directory, ca = stack.workload
+    before = _served_serial(stack)
+    assert before
+    gateway = directory / "gateways" / "content"
+    ca.issue(gateway, "content", "mcp-gateway", dns="mcp-gateway-content", rotate=True)
+    _wait(lambda: _served_serial(stack) not in {before, ""}, "the renewed gateway certificate", 60)
+    url = f"{GATEWAY}/mcp/test"
+    assert _as(stack, "/certs/ok", "http", "POST", url, _rpc("ping"))["status"] == 200
+
+
+def _served_serial(stack: Stack) -> str:
+    result = stack.probe("probe-agent-content", "serial", "mcp-gateway-content", "8443")
+    return str(result["serial"])
 
 
 def test_decision_logs_hold_no_tool_arguments(stack: Stack) -> None:

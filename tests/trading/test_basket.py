@@ -136,7 +136,7 @@ def test_paper_live_runs_a_basket(
     from mod_trading import __main__ as cli
 
     class Live:
-        def __init__(self, url: str) -> None:
+        def __init__(self, url: str, post: object) -> None:
             pass
 
         def bars(self, symbol: str, now: object) -> list[Bar]:

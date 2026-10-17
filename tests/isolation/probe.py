@@ -3,10 +3,14 @@
 Each command prints one JSON object:
     tcp HOST PORT                          {"ok": bool, "error": str}
     connect PROXY_HOST PROXY_PORT HOST PORT  {"status": int}  (HTTP CONNECT through a proxy)
+    serial HOST PORT                       {"serial": str}  (of the server's certificate)
     tls HOST PORT SNI                      {"ok": bool, "banner": str, "error": str}
                                            (ok after the handshake; banner if the server talks)
     http METHOD URL [JSON]                 {"status": int, "body": str}
     mcp URL METHOD PARAMS_JSON             {"status": int, "body": str}  (after an MCP handshake)
+
+https URLs use mutual TLS with the workload certificate in $PROBE_CERTS (tls.crt, tls.key,
+root_ca.crt; default /certs/ok). PROBE_CERTS=none connects without a client certificate.
 
 Standard library only: it runs in the plain Python image.
 """
@@ -14,6 +18,7 @@ Standard library only: it runs in the plain Python image.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import ssl
 import sys
@@ -54,6 +59,27 @@ def tls(host: str, port: int, sni: str) -> dict[str, Any]:
     return {"ok": True, "banner": banner, "error": ""}
 
 
+def _workload_context() -> ssl.SSLContext:
+    certs = os.environ.get("PROBE_CERTS", "/certs/ok")
+    if certs == "none":
+        return ssl.create_default_context(cafile="/certs/ok/root_ca.crt")
+    context = ssl.create_default_context(cafile=f"{certs}/root_ca.crt")
+    context.load_cert_chain(f"{certs}/tls.crt", f"{certs}/tls.key")
+    return context
+
+
+def serial(host: str, port: int) -> dict[str, Any]:
+    """The serial number of the certificate a workload server presents, verified."""
+    context = _workload_context()
+    try:
+        with socket.create_connection((host, port), timeout=5) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as conn:
+                cert = conn.getpeercert() or {}
+    except (OSError, ssl.SSLError):
+        return {"serial": ""}
+    return {"serial": str(cert.get("serialNumber", ""))}
+
+
 def http(method: str, url: str, payload: str | None, session: str | None = None) -> dict[str, Any]:
     headers = {"content-type": "application/json", "accept": "application/json, text/event-stream"}
     if session:
@@ -65,7 +91,8 @@ def http(method: str, url: str, payload: str | None, session: str | None = None)
         headers=headers,
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
+        context = _workload_context() if url.startswith("https://") else None
+        with urllib.request.urlopen(request, timeout=20, context=context) as response:  # noqa: S310
             return {
                 "status": response.status,
                 "body": response.read().decode(),
@@ -73,8 +100,10 @@ def http(method: str, url: str, payload: str | None, session: str | None = None)
             }
     except urllib.error.HTTPError as exc:
         return {"status": exc.code, "body": exc.read().decode()}
-    except OSError as exc:
-        return {"status": 0, "body": type(exc).__name__}
+    except (OSError, ssl.SSLError) as exc:
+        reason = getattr(exc, "reason", None)
+        name = type(reason).__name__ if isinstance(reason, BaseException) else type(exc).__name__
+        return {"status": 0, "body": name}
 
 
 def mcp(url: str, method: str, params: str) -> dict[str, Any]:
@@ -106,6 +135,8 @@ def main() -> None:
         result = tcp(args[0], int(args[1]))
     elif cmd == "connect":
         result = connect(args[0], int(args[1]), args[2], int(args[3]))
+    elif cmd == "serial":
+        result = serial(args[0], int(args[1]))
     elif cmd == "tls":
         result = tls(args[0], int(args[1]), args[2])
     elif cmd == "mcp":

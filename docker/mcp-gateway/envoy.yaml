@@ -1,12 +1,24 @@
 # Policy gateway in front of one domain's MCP server (docs/architecture.md, section 7).
 #
-# Agents reach the MCP server only through this Envoy. Every request is checked by the
-# domain's OPA (ext_authz, policies/mcp/authz.rego) with the JSON-RPC body attached; if OPA
-# is unreachable or slow, the request is refused (fail closed). Upstream names are network
-# aliases on net-mcp-<domain>, so the same file serves every domain:
+# Agents reach the MCP server only through this Envoy, over mutual TLS: the gateway presents
+# its workload certificate and requires one from the caller, both issued by the workload CA
+# (docker/pki/). Envoy checks the chain, the validity period and that the caller carries a
+# SPIFFE ID; OPA then checks that the ID belongs to this domain. Certificates are read from
+# /certs (tls.crt, tls.key, root_ca.crt, the domain volume's mcp-gateway directory) and
+# reloaded when pki-issue swaps them, without a restart.
+#
+# Every request is checked by the domain's OPA (ext_authz, policies/mcp/authz.rego) with the
+# JSON-RPC body and the caller's SPIFFE ID attached; if OPA is unreachable or slow, the request
+# is refused (fail closed). Upstream names are network aliases on net-mcp-<domain>, so the same
+# file serves every domain:
 #   mcp-upstream:5678  the domain's n8n (MCP Server Trigger endpoints under /mcp/)
 #   opa:9191           the domain's OPA (Envoy ext_authz gRPC plugin)
 # There is no admin interface.
+
+# File-based SDS (the certificates) needs a node identity; it names nothing outside this file.
+node:
+  id: mcp-gateway
+  cluster: mcp-gateway
 
 overload_manager:
   resource_monitors:
@@ -19,14 +31,39 @@ static_resources:
   listeners:
     - name: mcp
       address:
-        socket_address: { address: 0.0.0.0, port_value: 8080 }
+        socket_address: { address: 0.0.0.0, port_value: 8443 }
       filter_chains:
-        - filters:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              require_client_certificate: true
+              common_tls_context:
+                tls_params:
+                  tls_minimum_protocol_version: TLSv1_3
+                alpn_protocols: ["http/1.1"]
+                tls_certificate_sds_secret_configs:
+                  - name: workload
+                    sds_config:
+                      path_config_source: { path: /etc/envoy/sds/workload.yaml }
+                      resource_api_version: V3
+                combined_validation_context:
+                  default_validation_context:
+                    match_typed_subject_alt_names:
+                      - san_type: URI
+                        matcher: { prefix: "spiffe://jarvis.home/" }
+                  validation_context_sds_secret_config:
+                    name: workload_ca
+                    sds_config:
+                      path_config_source: { path: /etc/envoy/sds/workload_ca.yaml }
+                      resource_api_version: V3
+          filters:
             - name: envoy.filters.network.http_connection_manager
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: mcp
                 codec_type: HTTP1
+                forward_client_cert_details: SANITIZE
                 normalize_path: true
                 merge_slashes: true
                 path_with_escaped_slashes_action: REJECT_REQUEST
@@ -42,7 +79,7 @@ static_resources:
                       log_format:
                         # Method, path and status only: no bodies, no query strings, no headers.
                         text_format_source:
-                          inline_string: "%START_TIME% %DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% %REQ(:METHOD)% %REQ(:PATH):128% %RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%\n"
+                          inline_string: "%START_TIME% %DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% %DOWNSTREAM_PEER_URI_SAN% %REQ(:METHOD)% %REQ(:PATH):128% %RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%\n"
                 route_config:
                   name: mcp
                   virtual_hosts:

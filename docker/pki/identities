@@ -1,8 +1,12 @@
-# domain service: one workload identity per line (docs/runbooks/audit-hardening.md).
-core audit-keeper
-core git-gateway
-trading executor
-trading mcp-gateway-trading
-content mcp-gateway-content
-private assistant
-private mcp-gateway-private
+# domain service uid [dns name]: one workload identity per line
+# (docs/runbooks/audit-hardening.md). The files are owned by uid, the user the consuming
+# container runs as; 0 marks identities no service consumes yet. The dns name is for
+# servers that clients reach by host name.
+core audit-keeper 0
+core git-gateway 0
+trading executor 0
+trading mcp-gateway 101 mcp-gateway-trading
+trading paper 10003
+content mcp-gateway 101 mcp-gateway-content
+private assistant 0
+private mcp-gateway 101 mcp-gateway-private

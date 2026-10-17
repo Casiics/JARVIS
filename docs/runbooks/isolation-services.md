@@ -42,7 +42,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.debug.yml u
 2. Add that path to `endpoints` and each tool name to `tools` in `policies/mcp-tools/<domain>.json`. This is a protected path, so it lands by PR with your review.
 3. `docker compose restart opa-<domain>`.
 
-Agents call `http://mcp-gateway-<domain>:8080/mcp/<path>`. Anything not listed, any other MCP method (resources, prompts, sampling), any query string and bodies over 64 KiB are refused. OPA decision logs keep method and tool name but mask arguments.
+Agents call `https://mcp-gateway-<domain>:8443/mcp/<path>` with mutual TLS: each side presents its workload certificate ([`audit-hardening.md`](audit-hardening.md), section 3). A caller without a certificate, with an expired one or one from another CA fails the handshake; a valid certificate of another domain is refused by OPA (403). Anything not listed, any other MCP method (resources, prompts, sampling), any query string and bodies over 64 KiB are refused. OPA decision logs keep method and tool name but mask arguments.
 
 n8n hardening: public API, telemetry, templates and community packages are off; nodes cannot read environment variables; the Execute Command, SSH, Git and local file nodes are removed; executions are pruned after 14 days. Credentials live in each n8n's own encrypted store.
 

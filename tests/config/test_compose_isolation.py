@@ -133,12 +133,13 @@ def test_isolation_services_are_hardened(compose: dict[str, Any], service: str) 
     assert spec.get("cap_drop") == ["ALL"]
     assert "no-new-privileges:true" in spec.get("security_opt", [])
     assert spec.get("user"), f"{service} must set its user"
-    if service != "pki-issue":  # root without capabilities, see the compose comment
+    if service != "pki-issue":  # root with only CHOWN, see the compose comment
         assert not str(spec["user"]).startswith("0"), f"{service} must not run as root"
-    # pki-ca and edge-caddy: their binaries need this one capability to exec, see the compose
-    # comments.
-    needs_bind = service in {"pki-ca", "edge-caddy"}
-    assert spec.get("cap_add", []) == (["NET_BIND_SERVICE"] if needs_bind else [])
+    # pki-ca and edge-caddy: their binaries need this one capability to exec; pki-issue hands
+    # certificates to their consumers' users. See the compose comments.
+    expected = {"pki-ca": ["NET_BIND_SERVICE"], "edge-caddy": ["NET_BIND_SERVICE"]}
+    expected["pki-issue"] = ["CHOWN"]
+    assert spec.get("cap_add", []) == expected.get(service, [])
 
 
 @pytest.mark.parametrize("domain", ["trading", "content"])
@@ -249,6 +250,11 @@ def test_only_the_issuer_joins_the_ca_and_writes_certificates(compose: dict[str,
                 assert name in {"pki-ca", "pki-init"} or str(volume).endswith(":ro"), name
             if str(volume).startswith("certs_"):
                 assert name == "pki-issue", f"{name} mounts {volume}"
+            if isinstance(volume, dict) and str(volume.get("source")).startswith("certs_"):
+                assert name != "pki-issue"
+                assert volume["read_only"] is True, name
+                # One identity's directory, never the whole domain volume.
+                assert volume["volume"]["subpath"], name
     issued = {
         v.split(":")[0]: v.split(":")[1]
         for v in compose["services"]["pki-issue"]["volumes"]
@@ -301,3 +307,68 @@ def test_deck_edge_terminates_tls13_on_the_tailnet_only() -> None:
     # The upstream is the gateway on the host's loopback, nothing else.
     upstreams = [line for line in lines if line.startswith("reverse_proxy")]
     assert upstreams == ["reverse_proxy 127.0.0.1:{$JARVIS_DECK_UPSTREAM_PORT:8080} {"]
+
+
+IDENTITIES = COMPOSE.parent / "pki/identities"
+
+
+def _identities() -> list[list[str]]:
+    lines = IDENTITIES.read_text().splitlines()
+    return [line.split() for line in lines if line.strip() and not line.startswith("#")]
+
+
+@pytest.mark.parametrize("domain", ["trading", "content", "private"])
+def test_mcp_gateways_mount_only_their_own_certificate(
+    compose: dict[str, Any], domain: str
+) -> None:
+    service = compose["services"][f"mcp-gateway-{domain}"]
+    mounts = [v for v in service["volumes"] if isinstance(v, dict)]
+    assert mounts == [
+        {
+            "type": "volume",
+            "source": f"certs_{domain}",
+            "target": "/certs",
+            "read_only": True,
+            "volume": {"subpath": "mcp-gateway"},
+        }
+    ]
+    uid = str(service["user"]).split(":")[0]
+    assert [domain, "mcp-gateway", uid, f"mcp-gateway-{domain}"] in _identities()
+
+
+def test_identities_are_unique_and_well_formed() -> None:
+    identities = _identities()
+    assert len({(i[0], i[1]) for i in identities}) == len(identities)
+    for identity in identities:
+        assert 3 <= len(identity) <= 4, identity
+        assert identity[2].isdigit(), identity
+
+
+def test_mcp_gateways_require_client_certificates() -> None:
+    envoy = yaml.safe_load((COMPOSE.parent / "mcp-gateway/envoy.yaml").read_text())
+    [listener] = envoy["static_resources"]["listeners"]
+    [chain] = listener["filter_chains"]
+    tls = chain["transport_socket"]["typed_config"]
+    assert tls["require_client_certificate"] is True
+    context = tls["common_tls_context"]
+    assert context["tls_params"]["tls_minimum_protocol_version"] == "TLSv1_3"
+    sans = context["combined_validation_context"]["default_validation_context"]
+    assert sans["match_typed_subject_alt_names"] == [
+        {"san_type": "URI", "matcher": {"prefix": "spiffe://jarvis.home/"}}
+    ]
+
+
+def test_trading_paper_presents_its_own_certificate(compose: dict[str, Any]) -> None:
+    service = compose["services"]["trading-paper"]
+    mounts = [v for v in service["volumes"] if isinstance(v, dict)]
+    assert mounts == [
+        {
+            "type": "volume",
+            "source": "certs_trading",
+            "target": "/certs",
+            "read_only": True,
+            "volume": {"subpath": "paper"},
+        }
+    ]
+    uid = str(service["user"]).split(":")[0]
+    assert ["trading", "paper", uid] in _identities()

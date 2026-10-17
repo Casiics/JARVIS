@@ -16,7 +16,17 @@ from collections.abc import Iterator
 import pytest
 import yaml
 
-from tests.isolation.test_isolation_live import COMPOSE, HERE, PYTHON, ROOT, Stack, _secrets, _wait
+from tests.isolation.test_isolation_live import (
+    COMPOSE,
+    HERE,
+    PYTHON,
+    ROOT,
+    Stack,
+    _secrets,
+    _wait,
+    gateway_certs,
+    workload_certs,
+)
 from tests.isolation.test_n8n_mcp_live import _result
 
 pytestmark = [
@@ -26,7 +36,7 @@ pytestmark = [
     ),
 ]
 
-URL = "http://mcp-gateway-trading:8080/mcp/marketdata"
+URL = "https://mcp-gateway-trading:8443/mcp/marketdata"
 WORKFLOW = ROOT / "core/n8n-workflows/trading-marketdata.json"
 
 
@@ -34,16 +44,23 @@ WORKFLOW = ROOT / "core/n8n-workflows/trading-marketdata.json"
 def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     tmp = tmp_path_factory.mktemp("n8n-trading")
     _secrets(tmp / "secrets")
+    ca = workload_certs(tmp / "workload", "trading")
+    ca.issue(tmp / "workload" / "paper", "trading", "paper")  # the trading-paper service's own
     override = tmp / "override.yml"
     override.write_text(
         yaml.safe_dump(
             {
                 "services": {
+                    "mcp-gateway-trading": gateway_certs(tmp / "workload", "trading"),
+                    "trading-paper": {"volumes": [f"{tmp / 'workload' / 'paper'}:/certs:ro"]},
                     "probe-agent-trading": {
                         "image": PYTHON,
                         "command": ["sleep", "infinity"],
                         "networks": ["net-trading"],
-                        "volumes": [f"{HERE / 'probe.py'}:/probe.py:ro"],
+                        "volumes": [
+                            f"{HERE / 'probe.py'}:/probe.py:ro",
+                            f"{tmp / 'workload' / 'agents'}:/certs:ro",
+                        ],
                     },
                 }
             }

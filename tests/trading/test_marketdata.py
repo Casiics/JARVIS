@@ -136,7 +136,7 @@ class FakeGateway:
 
 def test_bars_come_from_the_mcp_tool() -> None:
     gateway = FakeGateway({"content": [{"type": "text", "text": raw([500.0, 501.0])}]})
-    bars = McpBarSource("http://mcp-gateway-trading:8080/mcp/marketdata", gateway).bars(
+    bars = McpBarSource("https://mcp-gateway-trading:8443/mcp/marketdata", gateway).bars(
         "SPY", OPEN + timedelta(hours=1)
     )
     assert len(bars) == 2
@@ -242,7 +242,7 @@ def test_paper_live_polls_once(
     answer = raw([500.0 + (i % 7) for i in range(40)], start=start)
 
     class Source:
-        def __init__(self, url: str) -> None:
+        def __init__(self, url: str, post: object) -> None:
             assert url.endswith("/mcp/marketdata")
 
         def bars(self, symbol: str, now: datetime) -> list[Bar]:
@@ -261,7 +261,7 @@ def test_service_mode_waits_for_the_switch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class Empty:
-        def __init__(self, url: str) -> None:
+        def __init__(self, url: str, post: object) -> None:
             pass
 
         def bars(self, symbol: str, now: datetime) -> list[Bar]:
@@ -300,7 +300,7 @@ def test_history_writes_a_backtest_csv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class Source:
-        def __init__(self, url: str) -> None:
+        def __init__(self, url: str, post: object) -> None:
             pass
 
         def daily(self, symbol: str, now: datetime) -> list[Bar]:
@@ -316,7 +316,7 @@ def test_history_writes_a_backtest_csv(
 
 def test_history_reports_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class Down:
-        def __init__(self, url: str) -> None:
+        def __init__(self, url: str, post: object) -> None:
             pass
 
         def daily(self, symbol: str, now: datetime) -> list[Bar]:

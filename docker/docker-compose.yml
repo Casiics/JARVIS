@@ -82,8 +82,6 @@ x-mcp-gateway: &mcp-gateway
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
   entrypoint: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
-  volumes:
-    - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
 
 x-opa: &opa
   image: openpolicyagent/opa:1.21.2-envoy-static
@@ -191,6 +189,15 @@ services:
     <<: *mcp-gateway
     networks: [net-trading, net-mcp-trading]
     depends_on: [opa-trading]
+    volumes:
+      - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./mcp-gateway/sds:/etc/envoy/sds:ro
+      # Its own workload certificate only (pki-issue); without it the gateway does not start.
+      - type: volume
+        source: certs_trading
+        target: /certs
+        read_only: true
+        volume: {subpath: mcp-gateway}
 
   # Paper trading on live 1-minute bars (docs/runbooks/trading-paper.md). Opt in with
   # `--profile paper`. Only on net-trading: it reaches market data through mcp-gateway-trading
@@ -220,6 +227,12 @@ services:
     tmpfs: [/tmp]
     volumes:
       - trading_paper_data:/var/lib/jarvis/trading
+      # Its workload certificate for mutual TLS with mcp-gateway-trading (pki-issue).
+      - type: volume
+        source: certs_trading
+        target: /certs
+        read_only: true
+        volume: {subpath: paper}
 
   # --- content --------------------------------------------------------------------------------
   pg-content:
@@ -280,6 +293,15 @@ services:
     <<: *mcp-gateway
     networks: [net-content, net-mcp-content]
     depends_on: [opa-content]
+    volumes:
+      - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./mcp-gateway/sds:/etc/envoy/sds:ro
+      # Its own workload certificate only (pki-issue); without it the gateway does not start.
+      - type: volume
+        source: certs_content
+        target: /certs
+        read_only: true
+        volume: {subpath: mcp-gateway}
 
   # The reel fetch sandbox (mod_content.reel.sandbox) joins jarvis-sandbox-egress and reaches
   # only the hosts in policies/egress/reel.allow.
@@ -385,6 +407,15 @@ services:
     <<: *mcp-gateway
     networks: [net-private, net-mcp-private]
     depends_on: [opa-private]
+    volumes:
+      - ./mcp-gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./mcp-gateway/sds:/etc/envoy/sds:ro
+      # Its own workload certificate only (pki-issue); without it the gateway does not start.
+      - type: volume
+        source: certs_private
+        target: /certs
+        read_only: true
+        volume: {subpath: mcp-gateway}
 
   # Phase 5 assistant: calendar and mail sync, triage, briefing and reply drafts, all on local
   # models. One-shot (`docker compose run --rm private-assistant daily`), so it sits behind a
@@ -524,6 +555,8 @@ services:
     user: "0:0"
     read_only: true
     cap_drop: [ALL]
+    # Hands each certificate to the user its consumer runs as (docker/pki/identities).
+    cap_add: [CHOWN]
     security_opt: ["no-new-privileges:true"]
     networks: [net-pki]
     entrypoint: ["/bin/sh", "/etc/jarvis/pki-issue.sh"]

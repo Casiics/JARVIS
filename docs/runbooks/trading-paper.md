@@ -188,7 +188,7 @@ docker compose -f docker/docker-compose.yml restart opa-trading egress-trading
 
 ### Run as a service
 
-`trading-paper` runs `paper-live` around the clock on `net-trading`, with the baseline strategy on SPY by default (`JARVIS_PAPER_INSTRUMENT`, `JARVIS_PAPER_STRATEGY`). It sits behind the `paper` profile, so a plain `up -d` never starts trading.
+`trading-paper` runs `paper-live` around the clock on `net-trading`, with the baseline strategy on SPY by default (`JARVIS_PAPER_INSTRUMENT`, `JARVIS_PAPER_STRATEGY`). It sits behind the `paper` profile, so a plain `up -d` never starts trading. It reads its workload certificate from `/certs` (volume `certs_trading`, subpath `paper`, see [`audit-hardening.md`](audit-hardening.md), section 3): the gateway speaks only mutual TLS on port 8443.
 
 ```bash
 docker compose -f docker/docker-compose.yml --profile paper build trading-paper
