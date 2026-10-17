@@ -174,6 +174,21 @@ mod_trading (net-trading) ──MCP──▶ mcp-gateway-trading ──▶ n8n-t
 - **Recording:** every traded bar is appended to `<data-dir>/bars/<instrument>-<date>.csv`, which `backtest --bars` reads directly.
 - **History for backtests:** `python -m mod_trading history --instrument SPY --out spy-daily.csv` asks the second tool, `get_daily`, for up to ten years of daily bars and writes them as backtest CSV.
 
+### One command
+
+`scripts/trading-paper-local.sh` wraps the steps below for the SPY, QQQ and IWM basket (`JARVIS_PAPER_INSTRUMENT` overrides it). Unpack the trading secrets first (`scripts/secrets-unpack.sh trading`).
+
+```bash
+scripts/trading-paper-local.sh setup      # once: n8n-trading, workflow, image, a data check
+scripts/trading-paper-local.sh release    # a human step: you type "release"
+scripts/trading-paper-local.sh up         # runs in the background, restarts with Docker
+scripts/trading-paper-local.sh status     # account, positions, kill switch
+scripts/trading-paper-local.sh history    # daily history per instrument, copied to ~/jarvis-data/trading/history
+scripts/trading-paper-local.sh research   # research lab on that history, local models only
+```
+
+What "learning" means here: no model is trained on prices. The session records every live 1-minute bar, the history command refreshes daily bars, and the research lab lets local workers propose rules that are tested on the older 60 % and must then beat the baseline on a holdout they never saw. Rules that pass are only candidates; switching the paper session to one is a human decision. The paper account itself is the out-of-sample test: weeks of results without a risk-limit violation are the exit criterion below.
+
 ### One-time setup
 
 ```bash
