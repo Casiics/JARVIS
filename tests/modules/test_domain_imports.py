@@ -1,7 +1,8 @@
 """Each domain package imports only jarvis_core, itself, the stdlib and pydantic.
 
 The trading risk engine is stricter: it may not import jarvis_core or the trading module, so it
-can be reviewed as a closed unit.
+can be reviewed as a closed unit. Trading research may reach the model router, but the trading
+module may not import it, so nothing a model writes can reach the order path.
 """
 
 from __future__ import annotations
@@ -20,6 +21,11 @@ PACKAGES = {
         {"jarvis_core", "mod_trading", "trading_risk"},
     ),
     "trading_risk": (MODULES / "mod-trading/risk/trading_risk", {"trading_risk"}),
+    # Research workers may call models; mod_trading may not import them (not in its set).
+    "trading_research": (
+        MODULES / "mod-trading/trading_research",
+        {"jarvis_core", "mod_trading", "trading_research"},
+    ),
 }
 
 

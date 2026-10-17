@@ -116,11 +116,11 @@ Research agents never write code and never trade. They work in the supervisor-wo
 6. A spec that passes the holdout becomes a **paper candidate** in `<data-dir>/research/candidates/` (spec JSON and a `ts,weight` file for `research-gate`). Putting it on the paper account stays a human step.
 
 ```bash
-uv run python -m mod_trading.lab --data-dir /var/lib/jarvis/trading run --bars spy-daily.csv qqq-daily.csv --ollama-url http://localhost:11434
-uv run python -m mod_trading.lab --data-dir /var/lib/jarvis/trading ledger
+uv run python -m trading_research --data-dir /var/lib/jarvis/trading run --bars spy-daily.csv qqq-daily.csv --ollama-url http://localhost:11434
+uv run python -m trading_research --data-dir /var/lib/jarvis/trading ledger
 ```
 
-The lab runs on local models with a cloud budget of zero. Market prices are public, so a later switch to a cloud model class is a routing decision, not a privacy one.
+The lab runs on local models with a cloud budget of zero. The model wiring lives in its own package, `trading_research`; `mod_trading` itself never reaches the model router and may not import that package (`tests/modules/test_domain_imports.py`), so nothing a model writes can reach the order path. Market prices are public, so a later switch to a cloud model class is a routing decision, not a privacy one.
 
 ## Live market data
 

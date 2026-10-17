@@ -43,6 +43,7 @@ packages = [
     "modules/mod-private/mod_private",
     "modules/mod-trading/mod_trading",
     "modules/mod-trading/risk/trading_risk",
+    "modules/mod-trading/trading_research",
 ]
 
 # Editable installs put each package's parent on sys.path (the risk engine sits one level deeper).
@@ -64,7 +65,14 @@ select = ["E", "F", "I", "B", "UP", "S", "RUF"]
 ignore = ["S101"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["jarvis_core", "mod_content", "mod_private", "mod_trading", "trading_risk"]
+known-first-party = [
+    "jarvis_core",
+    "mod_content",
+    "mod_private",
+    "mod_trading",
+    "trading_research",
+    "trading_risk",
+]
 
 [tool.mypy]
 strict = true
@@ -77,7 +85,14 @@ mypy_path = [
     "modules/mod-trading",
     "modules/mod-trading/risk",
 ]
-packages = ["jarvis_core", "mod_content", "mod_private", "mod_trading", "trading_risk"]
+packages = [
+    "jarvis_core",
+    "mod_content",
+    "mod_private",
+    "mod_trading",
+    "trading_research",
+    "trading_risk",
+]
 exclude = ["modules/mod-content/sandbox/"]
 
 [tool.pytest.ini_options]

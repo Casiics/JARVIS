@@ -25,9 +25,9 @@ from mod_trading.lab import (
     Ledger,
     ResearchLab,
     Workbench,
-    _claims,
     _split,
     market_brief,
+    research_claims,
 )
 from mod_trading.research import ResearchGate
 from mod_trading.signals import SignalSpec, compile_spec, describe, feature_value
@@ -149,7 +149,7 @@ def make_lab(
         loop=SupervisorWorkerLoop(TaskMachine(writer.write, "spiffe://test/lab")),
         researcher=researcher or Scripted([HYPOTHESES]),
         builder=builder,
-        claims=_claims,
+        claims=research_claims,
         audit=audit,
     )
     return lab, audited
@@ -244,7 +244,7 @@ def test_unknown_instruments_go_back_to_the_researcher(tmp_path: Path) -> None:
 def test_the_ledger_command_lists_what_was_tested(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from mod_trading.lab import main
+    from trading_research.__main__ import main
 
     lab, _ = make_lab(tmp_path / "research", Scripted([MOMENTUM]), margin=-10.0)
     lab.run()
