@@ -37,6 +37,7 @@ EXPECTED_NETWORKS = {
     "opa-private": {"net-mcp-private"},
     "mcp-gateway-private": {"net-private", "net-mcp-private"},
     "private-assistant": {"net-private-assistant", "net-inference-private"},
+    "trading-paper": {"net-trading"},
     "audit-keeper": {"net-core"},
     "pki-ca": {"net-pki"},
     "pki-init": set(),
@@ -65,7 +66,7 @@ HARDENED = [
     s
     for s in EXPECTED_NETWORKS
     if s.startswith(("egress-", "n8n-", "opa-", "mcp-gateway-", "pki-", "edge-"))
-    or s in {"private-assistant", "audit-keeper"}
+    or s in {"private-assistant", "audit-keeper", "trading-paper"}
 ]
 
 
