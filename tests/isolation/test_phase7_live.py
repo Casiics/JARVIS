@@ -246,13 +246,13 @@ def test_no_domain_network_reaches_the_ca(pki: Stack) -> None:
 
 
 def test_each_certificate_belongs_to_its_consumer(pki: Stack) -> None:
-    # Envoy runs as 101, the trading client as 10001; nobody else may read the keys.
+    # Envoy runs as 101, the trading client as 10003; nobody else may read the keys.
     listing = inspect(
         pki, "trading", "stat -L -c '%n %u %a' /c/mcp-gateway/tls.key /c/paper/tls.key"
     )
     assert listing.split("\n")[:2] == [
         "/c/mcp-gateway/tls.key 101 400",
-        "/c/paper/tls.key 10001 400",
+        "/c/paper/tls.key 10003 400",
     ]
 
 

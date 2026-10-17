@@ -6,7 +6,7 @@ core audit-keeper 0
 core git-gateway 0
 trading executor 0
 trading mcp-gateway 101 mcp-gateway-trading
-trading paper 10001
+trading paper 10003
 content mcp-gateway 101 mcp-gateway-content
 private assistant 0
 private mcp-gateway 101 mcp-gateway-private
