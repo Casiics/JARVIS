@@ -32,6 +32,8 @@ echo "Starting the download proxy egress-reel ..."
 docker compose -f "$REPO_ROOT/docker/docker-compose.yml" up -d --wait egress-reel >/dev/null
 
 cd "$REPO_ROOT"
+# Only reels core dispatched run: their task tokens are checked with the deck's public key.
+TASK_PUBLIC_KEY="$(uv run python -m jarvis_core.orchestrator public-key --secrets-root "$STATE/secrets")"
 exec uv run python -m mod_content.reel --data-dir "$DATA/content" serve \
   --engine docker --whisper-models "$DATA/models/whisper" \
-  --boundary-dir "$STATE/boundary" --show-sandbox-errors
+  --boundary-dir "$STATE/boundary" --show-sandbox-errors --task-public-key "$TASK_PUBLIC_KEY"

@@ -23,7 +23,7 @@ from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntr
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import BoundaryEvent, Taint, TaskMetadata
 from jarvis_core.contracts.reel_url import canonical_reel_url
-from jarvis_core.contracts.task_token import TaskTokenClaims, TaskTokenError, verify_token
+from jarvis_core.contracts.task_token import TaskTokenClaims, TaskTokenError, TaskTokenVerifier
 from jarvis_core.orchestrator.state_machine import Event, Task, TaskMachine, TaskState
 from jarvis_core.policy.flows import check_flow
 from jarvis_core.router.client import ModelClientError
@@ -148,7 +148,7 @@ class ReelPipeline:
     runner: SandboxRunner
     gateway: InferenceGateway
     audit: CountingSink
-    token_key: bytes
+    tokens: TaskTokenVerifier
     work_root: Path
     whisper: WhisperConfig
     images: SandboxImages = field(default_factory=SandboxImages)
@@ -370,7 +370,7 @@ class ReelPipeline:
 
     def _claims(self, token: str, trace_id: str) -> TaskTokenClaims:
         try:
-            claims = verify_token(self.token_key, token)
+            claims = self.tokens.verify(token)
         except TaskTokenError as exc:
             self._audit_raw(None, trace_id, "task_token", AuditDecision.DENY, str(exc))
             raise

@@ -24,7 +24,7 @@ import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
@@ -32,11 +32,22 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import DataClassification, Domain
-from jarvis_core.contracts.events import BoundaryEvent, ReelSubmitted, TaskMetadata
+from jarvis_core.contracts.events import (
+    AuditAnchor,
+    BoundaryEvent,
+    ReelSubmitted,
+    Taint,
+    TaskMetadata,
+)
 from jarvis_core.contracts.reel_url import canonical_reel_url
+from jarvis_core.contracts.task_token import issue_signed_token
 from jarvis_core.contracts.telemetry import TelemetryEvent, TelemetryState
+from jarvis_core.orchestrator.anchors import AnchorBook, AnchorVerdict
 from jarvis_core.orchestrator.state_machine import TaskState
 from jarvis_core.storage import write_atomic
+
+if TYPE_CHECKING:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 ACTOR = "spiffe://jarvis.home/core/orchestrator"
 # Silence allowed between two signs of life from the domain. Reels queue behind each other in
@@ -76,20 +87,61 @@ class Dispatcher(Protocol):
     """Turns a goal into the boundary event its domain accepts."""
 
     domain: Domain
+    # What the task token for this kind of goal allows, and the taint it starts with.
+    tools: frozenset[str]
+    taint: Taint
 
-    def event(self, goal: Goal, task_id: UUID) -> BoundaryEvent: ...
+    def event(self, goal: Goal, task_id: UUID, token: str | None) -> BoundaryEvent: ...
 
 
 class ReelDispatcher:
     domain = Domain.CONTENT
+    # The reel pipeline's steps (mod_content.reel.pipeline.REEL_TOOLS). Core cannot import the
+    # domain, so the list is kept here; a step missing from it fails closed in the worker.
+    tools = frozenset(
+        {
+            "sandbox.fetch",
+            "sandbox.extract",
+            "sandbox.transcribe",
+            "model.vision",
+            "model.extract",
+            "propose_skill_candidate",
+        }
+    )
+    taint = Taint.EXTERNAL_CONTENT
 
-    def event(self, goal: Goal, task_id: UUID) -> BoundaryEvent:
+    def event(self, goal: Goal, task_id: UUID, token: str | None) -> BoundaryEvent:
         return ReelSubmitted(
             origin_domain=Domain.CORE,
             target_domain=Domain.CONTENT,
             classification=DataClassification.INTERNAL,
             task_id=task_id,
             source_ref=goal.source_ref,
+            task_token=token,
+        )
+
+
+class TaskTokenIssuer:
+    """The task router's signing half: one Ed25519 token per dispatched task.
+
+    Tokens live as long as the task's deadline, because a reel can wait in the worker's queue
+    that long before its first step. Local work only, so the budget is zero.
+    """
+
+    def __init__(self, key: Ed25519PrivateKey, ttl: timedelta = DEFAULT_DEADLINE) -> None:
+        self._key = key
+        self._ttl = ttl
+
+    def issue(self, dispatcher: Dispatcher, task_id: UUID, now: datetime) -> str:
+        return issue_signed_token(
+            self._key,
+            task_id=task_id,
+            domain=dispatcher.domain,
+            allowed_tools=dispatcher.tools,
+            budget_eur=0.0,
+            taint=dispatcher.taint,
+            ttl=self._ttl,
+            now=now,
         )
 
 
@@ -153,6 +205,8 @@ class Orchestrator:
         telemetry: TelemetrySink = lambda _e: None,
         deadline: timedelta = DEFAULT_DEADLINE,
         routes: dict[str, Dispatcher] | None = None,
+        tokens: TaskTokenIssuer | None = None,
+        anchors: AnchorBook | None = None,
     ) -> None:
         if mailbox.me is not Domain.CORE:
             raise ValueError("the orchestrator runs in core")
@@ -163,6 +217,10 @@ class Orchestrator:
         self._telemetry = telemetry
         self._deadline = deadline
         self._routes = ROUTES if routes is None else routes
+        # Without an issuer, events go out unsigned and a worker that checks tokens refuses
+        # them. Only tests and the deck without a reel worker run like that.
+        self._tokens = tokens
+        self._anchors = AnchorBook(None) if anchors is None else anchors
         self._lock = threading.RLock()
         self._tasks: dict[UUID, TaskRecord] = {}
         if path is not None and path.exists():
@@ -176,8 +234,9 @@ class Orchestrator:
         if dispatcher is None:
             raise UnroutableGoal(goal.kind)
         task_id = uuid4()
-        event = dispatcher.event(goal, task_id)
         now = self._clock()
+        token = None if self._tokens is None else self._tokens.issue(dispatcher, task_id, now)
+        event = dispatcher.event(goal, task_id, token)
         record = TaskRecord(
             task_id=task_id,
             kind=goal.kind,
@@ -245,6 +304,8 @@ class Orchestrator:
                         updated = self._apply(origin, event)
                         if updated is not None:
                             changed.append(updated)
+                    elif isinstance(event, AuditAnchor):
+                        self._anchor(origin, event)
                     self._mailbox.ack(letter)
             if changed:
                 self._save()
@@ -324,6 +385,26 @@ class Orchestrator:
         self._audit_entry(moved, f"{origin.value}:report:{state.value}", decision)
         self._emit(moved, f"{origin.value}:{moved.kind}")
         return moved
+
+    def _anchor(self, origin: Domain, event: AuditAnchor) -> None:
+        """Write a domain's chain head into core's log; a chain going backwards is a denial."""
+        verdict = self._anchors.record(origin, event)
+        if verdict is AnchorVerdict.UNCHANGED:
+            return
+        rolled_back = verdict is AnchorVerdict.ROLLED_BACK
+        self._audit(
+            AuditLogEntry(
+                trace_id=event.event_id.hex,
+                domain=Domain.CORE,
+                actor=ACTOR,
+                action=AuditAction.BOUNDARY_EVENT,
+                target=f"audit_anchor:{origin.value}/{event.chain}",
+                decision=AuditDecision.DENY if rolled_back else AuditDecision.ALLOW,
+                policy_id="audit-anchor-rollback" if rolled_back else None,
+                content_hash=event.head_hash,
+                content_ref=f"entries={event.entries}",
+            )
+        )
 
     def _audit_entry(
         self,

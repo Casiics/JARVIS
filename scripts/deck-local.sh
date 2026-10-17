@@ -19,7 +19,7 @@ done
 
 umask 077
 mkdir -p "$STATE/secrets/core" "$STATE/data"
-for key in approval_grant_key deck_bootstrap_code; do
+for key in approval_grant_key deck_bootstrap_code task_token_signing_key; do
   [[ -s "$STATE/secrets/core/$key" ]] || openssl rand -hex 32 > "$STATE/secrets/core/$key"
 done
 
