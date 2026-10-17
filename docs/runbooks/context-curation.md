@@ -113,6 +113,20 @@ order = with_context(order, ctx)  # pack becomes the first input, "curated_conte
 Entries above the ceiling are left out. `with_context` refuses context from another domain, a
 pack labelled above the order, and reel-derived (external) context for an untainted task token.
 
+## Shared memory of a domain's agents
+
+`MemorySteward` wraps the same store for the management layer:
+
+```python
+steward = MemorySteward(pipeline, audit_file=FileAuditStore(root / "audit.jsonl"))
+order = steward.recall(order, "QQQ earnings gaps")  # before the run
+steward.remember(order, [Lesson(title=..., summary=..., facts=(...), tags=("qqq",))])  # after
+steward.maintain()  # entries and stale entries per category, open reviews, audit chain
+```
+
+Lessons are agent proposals: the four stages decide what is stored, weak or flagged lessons wait
+in `review`. At most 10 lessons per run.
+
 ## Categories
 
 Categories are configuration: `modules/mod-content/mod_content/curation/categories.yaml`, or
