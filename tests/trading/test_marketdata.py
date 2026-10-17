@@ -212,7 +212,7 @@ def test_history_primes_and_only_new_bars_are_streamed() -> None:
         Decimal("505.000000"),
     ]
     assert recorded == streamed
-    assert errors == ["gateway unreachable"]
+    assert errors == ["SPY: gateway unreachable"]
 
 
 def test_recorded_bars_can_be_backtested(tmp_path: Path) -> None:

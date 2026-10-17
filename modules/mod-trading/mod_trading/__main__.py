@@ -1,6 +1,7 @@
 """Trading domain command line (paper only).
 
     python -m mod_trading backtest --bars bars.csv --instrument SPY
+    python -m mod_trading backtest --bars spy.csv qqq.csv --instrument SPY,QQQ --compare
     python -m mod_trading paper --bars today.csv --instrument SPY     # persistent paper account
     python -m mod_trading paper-live --instrument SPY                 # live bars through n8n
     python -m mod_trading history --instrument SPY --out spy-daily.csv  # daily bars, backtests
@@ -10,6 +11,8 @@
     python -m mod_trading ideas
 
 `backtest` replays bars against a fresh paper account with a released kill switch in memory.
+A comma-separated `--instrument` list trades a basket: one strategy per instrument, each with
+its own `--capital` sleeve, all on the same account and under the same risk limits.
 `paper-live` polls 1-minute bars from the n8n-trading MCP tool (mod_trading.marketdata) and
 trades them on the same paper account, against the wall clock, so stale data fails the risk
 engine's quote-age check. `paper` and `paper-live` keep account, equity tracker, kill switch
@@ -43,8 +46,21 @@ from mod_trading.broker import PaperBroker
 from mod_trading.executor import TRADING_TOOLS, OrderExecutor
 from mod_trading.feed import read_bars, replay
 from mod_trading.inbox import TradingInbox
-from mod_trading.marketdata import BarRecorder, LiveFeed, MarketDataError, McpBarSource
+from mod_trading.marketdata import (
+    BarRecorder,
+    BasketFeed,
+    LiveFeed,
+    MarketDataError,
+    McpBarSource,
+)
 from mod_trading.metrics import Performance, bars_per_year, buy_and_hold, performance
+from mod_trading.portfolio import (
+    PortfolioError,
+    aligned,
+    basket_of_weights,
+    correlations,
+    split_instruments,
+)
 from mod_trading.research import (
     ResearchGate,
     SignalError,
@@ -52,8 +68,9 @@ from mod_trading.research import (
     read_signal,
     weight_curve,
 )
+from mod_trading.schemas import Bar
 from mod_trading.session import SessionReport, run_session
-from mod_trading.strategies import SmaCrossover, Strategy, TrendVolTarget
+from mod_trading.strategies import Basket, SmaCrossover, Strategy, TrendVolTarget
 from trading_risk import KillSwitch, RiskEngine, RiskLimits
 
 # The live feed delivers 1-minute bars of the regular session: 390 a day, 252 days a year.
@@ -112,7 +129,10 @@ def sweep(args: argparse.Namespace) -> int:
     A robustness check, not an optimiser: a setting is only credible when its neighbours do
     about as well. Every run is a fresh in-memory backtest through the same risk limits.
     """
-    bars = read_bars(args.bars)
+    if len(args.instruments) != 1:
+        print("--sweep takes one instrument", file=sys.stderr)
+        return 2
+    bars = _read_all(args.bars)
     per_year = bars_per_year(bars)
     rows: dict[str, Performance] = {}
     for trend in SWEEP_TRENDS:
@@ -122,7 +142,8 @@ def sweep(args: argparse.Namespace) -> int:
             run = argparse.Namespace(**{**vars(args), "trend": trend, "target_vol": target_vol})
             clock = SimClock()
             built = _executor(run, clock, persistent=False, bar_frequency=per_year)
-            assert built is not None  # in-memory runs start with the switch released
+            if built is None:  # in-memory runs start released; only the setup can refuse
+                return 2
             executor, strategy = built
             report = run_session(
                 replay(bars, args.spread_bps), strategy, executor, claims, clock.set
@@ -133,7 +154,7 @@ def sweep(args: argparse.Namespace) -> int:
             mark = "*" if (trend, target_vol) == (args.trend, args.target_vol) else " "
             name = f"{mark}{trend}/{target_vol:.2f}{'!' if refused else ''}"
             rows[name] = performance(report.equity, per_year)
-    mine = [b for b in bars if b.instrument == args.instrument]
+    mine = [b for b in bars if b.instrument == args.instruments[0]]
     cost = args.spread_bps / 2 + Decimal(15)
     held = buy_and_hold(mine, cash=args.cash, capital=args.capital, cost_bps=cost)
     if len(held) >= 2:
@@ -147,7 +168,7 @@ def session(args: argparse.Namespace, *, persistent: bool) -> int:
     if getattr(args, "sweep", False):
         return sweep(args)
     clock = SimClock()
-    bars = read_bars(args.bars)
+    bars = _read_all(args.bars)
     built = _executor(args, clock, persistent=persistent, bar_frequency=bars_per_year(bars))
     if built is None:
         return 3
@@ -155,31 +176,66 @@ def session(args: argparse.Namespace, *, persistent: bool) -> int:
     report = run_session(replay(bars, args.spread_bps), strategy, executor, claims, clock.set)
     print_report(report)
     if getattr(args, "compare", False) and len(report.equity) >= 2:
-        per_year = bars_per_year(bars)
-        mine = [b for b in bars if b.instrument == args.instrument]
-        # Spread half plus the paper broker's slippage (5 bps) and fee (10 bps).
-        cost = args.spread_bps / 2 + Decimal(15)
+        return compare(args, bars, report.equity, strategy.name)
+    return 0
+
+
+def compare(
+    args: argparse.Namespace,
+    bars: list[Bar],
+    equity: list[tuple[datetime, Decimal]],
+    name: str,
+) -> int:
+    """The account against buy-and-hold, then the signal itself per instrument and as a basket."""
+    # Spread half plus the paper broker's slippage (5 bps) and fee (10 bps).
+    cost = args.spread_bps / 2 + Decimal(15)
+    try:
+        series = aligned(bars, args.instruments)
+    except PortfolioError as exc:
+        print(f"compare: {exc}", file=sys.stderr)
+        return 2
+    per_year = bars_per_year(next(iter(series.values())))
+    if len(args.instruments) == 1:
+        mine = series[args.instruments[0]]
         held = buy_and_hold(mine, cash=args.cash, capital=args.capital, cost_bps=cost)
         print_comparison(
-            {
-                strategy.name: performance(report.equity, per_year),
-                "buy_and_hold": performance(held, per_year),
-            }
+            {name: performance(equity, per_year), "buy_and_hold": performance(held, per_year)}
         )
-        if args.strategy == "trend-vol":
-            # The same decisions as compounding weights on the instrument, without the
-            # account's absolute limits: what the signal itself is worth.
-            weights = baseline_weights(mine, **_baseline_params(args, per_year))
-            print("signal on the instrument (compounding, no account limits):")
-            print_comparison(
-                {
-                    strategy.name: performance(weight_curve(mine, weights, float(cost)), per_year),
-                    "buy_and_hold": performance(
-                        weight_curve(mine, [1.0] * len(mine), float(cost)), per_year
-                    ),
-                }
-            )
+    else:
+        print_comparison({name: performance(equity, per_year)})
+    if args.strategy != "trend-vol":
+        return 0
+    # The same decisions as compounding weights on each instrument, without the account's
+    # absolute limits: what the signal itself is worth.
+    print("signal per instrument (compounding, no account limits):")
+    rows: dict[str, Performance] = {}
+    signal: dict[str, tuple[list[Bar], list[float]]] = {}
+    held_only: dict[str, tuple[list[Bar], list[float]]] = {}
+    for instrument, mine in series.items():
+        weights = baseline_weights(mine, **_baseline_params(args, per_year))
+        signal[instrument] = (mine, weights)
+        held_only[instrument] = (mine, [1.0] * len(mine))
+        rows[f"{instrument}/trend-vol"] = performance(
+            weight_curve(mine, weights, float(cost)), per_year
+        )
+        rows[f"{instrument}/hold"] = performance(
+            weight_curve(mine, [1.0] * len(mine), float(cost)), per_year
+        )
+    if len(series) > 1:
+        rows["basket/trend-vol"] = performance(basket_of_weights(signal, float(cost)), per_year)
+        rows["basket/hold"] = performance(basket_of_weights(held_only, float(cost)), per_year)
+    print_comparison(rows)
+    if len(series) > 1:
+        print("correlation of returns:")
+        for (left, right), value in correlations(series).items():
+            print(f"  {left}/{right}: {value:.2f}")
     return 0
+
+
+def _read_all(paths: list[Path]) -> list[Bar]:
+    bars = [bar for path in paths for bar in read_bars(path)]
+    bars.sort(key=lambda b: (b.ts, b.instrument))
+    return bars
 
 
 def _baseline_params(args: argparse.Namespace, per_year: int) -> dict[str, object]:
@@ -238,24 +294,31 @@ def live(args: argparse.Namespace) -> int:
     if built is None:
         return 3
     executor, strategy = built
-    feed = LiveFeed(
-        source=McpBarSource(args.mcp_url),
-        instrument=args.instrument,
-        spread_bps=args.spread_bps,
-        poll_s=args.poll_s,
-        clock=wall,
-        on_error=lambda msg: print(f"market data: {msg}", file=sys.stderr, flush=True),
-        record=BarRecorder(args.data_dir / "bars"),
-        max_polls=1 if args.once else None,
-    )
+    source = McpBarSource(args.mcp_url)
+    feeds = [
+        LiveFeed(
+            source=source,
+            instrument=instrument,
+            spread_bps=args.spread_bps,
+            poll_s=args.poll_s,
+            clock=wall,
+            on_error=lambda msg: print(f"market data: {msg}", file=sys.stderr, flush=True),
+            record=BarRecorder(args.data_dir / "bars"),
+            max_polls=1 if args.once else None,
+        )
+        for instrument in args.instruments
+    ]
+    feed = BasketFeed(feeds, poll_s=args.poll_s, max_polls=1 if args.once else None)
     history = feed.warmup()
     if history:
         # Prime the strategy's averages; orders on these old bars would only fail the
         # quote-age check, so their intents are dropped.
         account = executor.account_view(wall())
-        for bar in history:
+        for bar in sorted(history, key=lambda b: (b.ts, b.instrument)):
             strategy.on_bar(bar, account)
-    print(f"{args.instrument}: {len(history)} bars of history, polling every {args.poll_s:g} s")
+    for f in feeds:
+        primed = sum(1 for b in history if b.instrument == f.instrument)
+        print(f"{f.instrument}: {primed} bars of history, polling every {args.poll_s:g} s")
     report = run_session(feed.stream(), strategy, executor, claims, lambda _ts: None)
     print_report(report)
     return 0
@@ -309,27 +372,46 @@ def _executor(
         audit=audit,
         clock=clock,
     )
-    strategy: Strategy
-    if args.strategy == "trend-vol":
-        strategy = TrendVolTarget(
-            args.instrument,
-            trend=args.trend,
-            vol_window=args.vol_window,
-            target_vol=args.target_vol,
-            capital=args.capital,
-            max_order_notional=min(args.capital, limits.max_order_notional),
-            max_orders_per_bar=limits.max_orders_per_minute,
-            quantity_step=args.step,
-            bars_per_year=args.bars_per_year or bar_frequency,
+    # The order rate limit is per account, and a basket's members trade on the same minute,
+    # so they share it: with three orders a minute, three members get one each.
+    per_member = limits.max_orders_per_minute // len(args.instruments)
+    if per_member < 1:
+        print(
+            f"a basket of {len(args.instruments)} exceeds {limits.max_orders_per_minute} "
+            "orders a minute",
+            file=sys.stderr,
         )
-    else:
-        strategy = SmaCrossover(
-            args.instrument,
-            fast=args.fast,
-            slow=args.slow,
-            notional=args.notional,
-            quantity_step=args.step,
-        )
+        return None
+    members: dict[str, Strategy] = {}
+    for instrument in args.instruments:
+        if instrument not in limits.instruments:
+            # The risk engine would refuse every order; say so once instead of on every bar.
+            print(f"{instrument}: not on the risk allowlist, no orders", file=sys.stderr)
+            continue
+        if args.strategy == "trend-vol":
+            members[instrument] = TrendVolTarget(
+                instrument,
+                trend=args.trend,
+                vol_window=args.vol_window,
+                target_vol=args.target_vol,
+                capital=args.capital,
+                max_order_notional=min(args.capital, limits.max_order_notional),
+                max_orders_per_bar=per_member,
+                quantity_step=args.step,
+                bars_per_year=args.bars_per_year or bar_frequency,
+            )
+        else:
+            members[instrument] = SmaCrossover(
+                instrument,
+                fast=args.fast,
+                slow=args.slow,
+                notional=args.notional,
+                quantity_step=args.step,
+            )
+    if not members:
+        print("no instrument on the risk allowlist", file=sys.stderr)
+        return None
+    strategy: Strategy = next(iter(members.values())) if len(members) == 1 else Basket(members)
     return executor, strategy
 
 
@@ -359,8 +441,12 @@ def main(argv: list[str] | None = None) -> int:
             run.add_argument("--poll-s", type=float, default=60.0)
             run.add_argument("--once", action="store_true", help="poll once, then stop")
         else:
-            run.add_argument("--bars", type=Path, required=True)
-        run.add_argument("--instrument", required=True)
+            run.add_argument("--bars", type=Path, nargs="+", required=True)
+        run.add_argument(
+            "--instrument",
+            required=True,
+            help="one instrument, or a comma-separated basket such as SPY,QQQ",
+        )
         run.add_argument("--strategy", choices=["sma", "trend-vol"], default="sma")
         run.add_argument("--trend", type=int, default=200, help="trend-vol: average length")
         run.add_argument("--vol-window", type=int, default=20, help="trend-vol: returns")
@@ -410,6 +496,11 @@ def main(argv: list[str] | None = None) -> int:
     ks.add_argument("action", choices=["status", "engage", "release"])
     ks.add_argument("reason", nargs="?", default="manual")
     args = parser.parse_args(argv)
+    if args.command in ("backtest", "paper", "paper-live"):
+        try:
+            args.instruments = split_instruments(args.instrument)
+        except PortfolioError as exc:
+            parser.error(str(exc))
 
     if args.command == "backtest":
         return session(args, persistent=False)

@@ -94,6 +94,23 @@ buy_and_hold        2152.07%    8.87%   12.26%    0.76   50.82%
 
 About one percentage point of yearly return given up for less than half of the worst loss and a better Sharpe ratio. On the paper account the same run stays far smaller (CAGR 1.5 %), because the risk limits cap the position at 2500 and the strategy keeps its capital fixed instead of compounding; that is intended until the limits are raised by a human. Daily SPY data from `history` will replace the monthly proxy.
 
+## Basket: SPY, QQQ and IWM
+
+A comma-separated `--instrument` trades a basket: one baseline per instrument, each with its own `--capital` sleeve, all on one paper account under one set of risk limits. Each member sees only its own bars.
+
+```bash
+for s in SPY QQQ IWM; do python -m mod_trading history --instrument $s --out ${s,,}-daily.csv; done
+python -m mod_trading backtest --bars spy-daily.csv qqq-daily.csv iwm-daily.csv \
+  --instrument SPY,QQQ,IWM --strategy trend-vol --compare
+python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument SPY,QQQ --strategy trend-vol
+```
+
+- `--compare` prints the account, then each instrument's signal next to holding it, then the basket (equal sleeves, rebalanced every bar) next to holding the basket, and the correlation of returns per pair. Bars are aligned on the timestamps all instruments share.
+- **Correlation decides what a basket is worth.** SPY and QQQ typically correlate around 0.9 on daily returns, so two sleeves of them are closer to one bet than to two. IWM (small caps) diversifies more, but less than one might hope in a crash, when correlations rise together.
+- **Order rate:** `max_orders_per_minute` is per account and members trade on the same minute, so they share it (three a minute: one per member of a three-member basket). A larger rebalance then takes a few bars. A basket larger than the order rate is refused.
+- **Exposure:** three sleeves of 2400 make 7200, inside `max_gross_exposure` (8000). Raising `--capital` per sleeve needs the limits raised first, by a human.
+- **IWM is not on the risk engine's instrument allowlist** (`modules/mod-trading/risk/limits.json`, a protected path). Backtests with `--compare` and the research gate show IWM's signal, but no IWM orders are proposed (`IWM: not on the risk allowlist, no orders`) until a human adds it there; a basket including IWM trades only SPY and QQQ meanwhile.
+
 ## Research gate
 
 Ideas from research agents (market researcher, earnings reviewer) are signals: a weight between 0 and 1 per bar, written as CSV `ts,weight`. Before a signal may trade on paper, `research-gate` compares it with the trend-vol baseline on the same bars, both as compounding weight curves with the same costs:

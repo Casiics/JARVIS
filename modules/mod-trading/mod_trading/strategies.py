@@ -166,3 +166,24 @@ class TrendVolTarget:
             )
             remaining -= quantity
         return intents
+
+
+@dataclass
+class Basket:
+    """One strategy per instrument, each trading its own sleeve.
+
+    A bar goes only to the member for its instrument, so the members never see each other's
+    data and each sizes against its own `capital`. Together they stay subject to the account's
+    gross exposure limit like any other orders.
+    """
+
+    members: dict[str, Strategy]
+    name: str = "basket"
+
+    def __post_init__(self) -> None:
+        if not self.members:
+            raise ValueError("a basket needs at least one member")
+
+    def on_bar(self, bar: Bar, account: AccountView) -> list[OrderIntent]:
+        member = self.members.get(bar.instrument)
+        return member.on_bar(bar, account) if member else []
