@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import stat
 from datetime import UTC, date, datetime, timedelta
@@ -125,7 +126,9 @@ class Rig:
         )
 
     def audit_text(self) -> str:
-        return "\n".join(e.model_dump_json() for e in self.audit)
+        """Audit JSON without hashes and ids, whose random hex could contain a digit probe."""
+        text = "\n".join(e.model_dump_json() for e in self.audit)
+        return re.sub(r"[0-9a-f]{8}-[0-9a-f-]{27}|[0-9a-f]{32,}", "<hex>", text)
 
 
 def test_daily_flow_is_local_checked_and_leaves_no_content_in_audit(tmp_path: Path) -> None:

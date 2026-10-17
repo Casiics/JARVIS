@@ -8,23 +8,30 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from jarvis_core.boundary.mailbox import Mailbox, MailboxError
 from jarvis_core.contracts.audit import AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import DataClassification, Domain
-from jarvis_core.contracts.events import BoundaryEvent, ReelSubmitted, TaskMetadata
-from jarvis_core.contracts.task_token import verify_token
+from jarvis_core.contracts.events import BoundaryEvent, ReelSubmitted, Taint, TaskMetadata
+from jarvis_core.contracts.task_token import Ed25519TokenVerifier, public_key_hex
 from jarvis_core.contracts.telemetry import TelemetryEvent, TelemetryState
 from jarvis_core.orchestrator.service import (
+    DEFAULT_DEADLINE,
     Orchestrator,
+    ReelDispatcher,
     ReelGoal,
     TaskRecord,
+    TaskTokenIssuer,
     UnroutableGoal,
 )
 from jarvis_core.orchestrator.state_machine import TaskState
 from mod_content.reel import __main__ as content_cli
+from mod_content.reel.pipeline import REEL_TOOLS
 
 REEL = "https://www.instagram.com/reel/ABCDE12345/"
+CORE_KEY = Ed25519PrivateKey.from_private_bytes(b"c" * 32)
+VERIFIER = Ed25519TokenVerifier(CORE_KEY.public_key())
 
 
 class Clock:
@@ -51,6 +58,8 @@ class Harness:
             audit=self.audit.append,
             telemetry=self.telemetry.append,
             deadline=timedelta(minutes=10),
+            # The content worker checks expiry against the wall clock, not this test clock.
+            tokens=TaskTokenIssuer(CORE_KEY, ttl=timedelta(days=3650)),
         )
 
     def mailbox(self, domain: Domain) -> Mailbox:
@@ -181,8 +190,10 @@ def test_goals_without_a_route_are_refused(h: Harness) -> None:
 def test_a_dispatch_the_flow_policy_refuses_records_nothing(h: Harness) -> None:
     class ToTrading:
         domain = Domain.TRADING
+        tools = frozenset({"sandbox.fetch"})
+        taint = Taint.NONE
 
-        def event(self, goal: ReelGoal, task_id: UUID) -> BoundaryEvent:
+        def event(self, goal: ReelGoal, task_id: UUID, token: str | None) -> BoundaryEvent:
             return ReelSubmitted(
                 origin_domain=Domain.CORE,
                 target_domain=Domain.TRADING,
@@ -223,7 +234,7 @@ class FinishingPipeline:
 
     def run(self, url: str, token: str) -> object:
         self.urls.append(url)
-        task_id = verify_token(b"k" * 32, token).task_id
+        task_id = VERIFIER.verify(token).task_id
         self.mailbox.send(
             TaskMetadata(
                 origin_domain=Domain.CONTENT,
@@ -250,7 +261,7 @@ def test_end_to_end_a_reel_runs_through_the_content_worker_and_back(
 ) -> None:
     record = h.orchestrator.submit(ReelGoal(source_ref=REEL))
     pipeline = FinishingPipeline(h.mailbox(Domain.CONTENT))
-    monkeypatch.setattr(content_cli, "_build", lambda a, d, m=None: (pipeline, b"k" * 32))
+    monkeypatch.setattr(content_cli, "_build", lambda a, d, t, m=None: pipeline)
     monkeypatch.setattr(content_cli, "JsonlReelStore", NullStore)
 
     code = content_cli.main(
@@ -261,6 +272,8 @@ def test_end_to_end_a_reel_runs_through_the_content_worker_and_back(
             "--once",
             "--boundary-dir",
             str(h.root / "boundary"),
+            "--task-public-key",
+            public_key_hex(CORE_KEY),
         ]
     )
     assert code == 0 and pipeline.urls == [REEL]
@@ -310,3 +323,27 @@ def test_reported_cost_is_kept_as_a_running_total(h: Harness) -> None:
     task = h.orchestrator.get(record.task_id)
     assert task is not None and task.cost_eur == pytest.approx(0.03)
     assert h.telemetry[-1].cost_eur == pytest.approx(0.03)
+
+
+# --- task tokens: core's task router is the only issuer ---------------------------------------
+
+
+def test_dispatched_reels_carry_a_core_signed_token_for_exactly_that_task(h: Harness) -> None:
+    orchestrator = Orchestrator(
+        h.mailbox(Domain.CORE), None, clock=h.clock, tokens=TaskTokenIssuer(CORE_KEY)
+    )
+    record = orchestrator.submit(ReelGoal(source_ref=REEL))
+    [letter] = h.mailbox(Domain.CONTENT).receive(Domain.CORE)
+    event = letter.event
+    assert isinstance(event, ReelSubmitted) and event.task_token is not None
+    claims = VERIFIER.verify(event.task_token, now=h.clock.now)
+    assert claims.task_id == record.task_id
+    assert claims.domain is Domain.CONTENT
+    assert claims.allowed_tools == REEL_TOOLS
+    assert claims.taint is Taint.EXTERNAL_CONTENT and claims.budget_eur == 0.0
+    # Valid for the task's deadline, so a reel can wait in the worker's queue.
+    assert claims.expires_at == h.clock.now + DEFAULT_DEADLINE
+
+
+def test_core_and_the_reel_worker_agree_on_the_reel_tools() -> None:
+    assert ReelDispatcher.tools == REEL_TOOLS

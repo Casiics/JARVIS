@@ -94,6 +94,23 @@ buy_and_hold        2152.07%    8.87%   12.26%    0.76   50.82%
 
 About one percentage point of yearly return given up for less than half of the worst loss and a better Sharpe ratio. On the paper account the same run stays far smaller (CAGR 1.5 %), because the risk limits cap the position at 2500 and the strategy keeps its capital fixed instead of compounding; that is intended until the limits are raised by a human. Daily SPY data from `history` will replace the monthly proxy.
 
+## Basket: SPY, QQQ and IWM
+
+A comma-separated `--instrument` trades a basket: one baseline per instrument, each with its own `--capital` sleeve, all on one paper account under one set of risk limits. Each member sees only its own bars.
+
+```bash
+for s in SPY QQQ IWM; do python -m mod_trading history --instrument $s --out ${s,,}-daily.csv; done
+python -m mod_trading backtest --bars spy-daily.csv qqq-daily.csv iwm-daily.csv \
+  --instrument SPY,QQQ,IWM --strategy trend-vol --compare
+python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument SPY,QQQ --strategy trend-vol
+```
+
+- `--compare` prints the account, then each instrument's signal next to holding it, then the basket (equal sleeves, rebalanced every bar) next to holding the basket, and the correlation of returns per pair. Bars are aligned on the timestamps all instruments share.
+- **Correlation decides what a basket is worth.** SPY and QQQ typically correlate around 0.9 on daily returns, so two sleeves of them are closer to one bet than to two. IWM (small caps) diversifies more, but less than one might hope in a crash, when correlations rise together.
+- **Order rate:** `max_orders_per_minute` is per account and members trade on the same minute, so they share it (three a minute: one per member of a three-member basket). A larger rebalance then takes a few bars. A basket larger than the order rate is refused.
+- **Exposure:** three sleeves of 2400 make 7200, inside `max_gross_exposure` (8000). Raising `--capital` per sleeve needs the limits raised first, by a human.
+- **IWM is not on the risk engine's instrument allowlist** (`modules/mod-trading/risk/limits.json`, a protected path). Backtests with `--compare` and the research gate show IWM's signal, but no IWM orders are proposed (`IWM: not on the risk allowlist, no orders`) until a human adds it there; a basket including IWM trades only SPY and QQQ meanwhile.
+
 ## Research gate
 
 Ideas from research agents (market researcher, earnings reviewer) are signals: a weight between 0 and 1 per bar, written as CSV `ts,weight`. Before a signal may trade on paper, `research-gate` compares it with the trend-vol baseline on the same bars, both as compounding weight curves with the same costs:
@@ -149,20 +166,26 @@ docker compose -f docker/docker-compose.yml up -d n8n-trading opa-trading mcp-ga
 docker compose -f docker/docker-compose.yml restart opa-trading egress-trading
 ```
 
-### Run
+### Run as a service
 
-`paper-live` must run where `mcp-gateway-trading` resolves, which is `net-trading`. It polls every 60 s (`--poll-s`); `--once` polls a single time, which is the quickest check that data arrives.
+`trading-paper` runs `paper-live` around the clock on `net-trading`, with the baseline strategy on SPY by default (`JARVIS_PAPER_INSTRUMENT`, `JARVIS_PAPER_STRATEGY`). It sits behind the `paper` profile, so a plain `up -d` never starts trading.
 
 ```bash
-python -m mod_trading --data-dir /var/lib/jarvis/trading kill-switch release
-python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument SPY
+docker compose -f docker/docker-compose.yml --profile paper build trading-paper
+docker compose -f docker/docker-compose.yml --profile paper up -d trading-paper
+# The kill switch starts engaged; the service waits until you release it:
+docker compose -f docker/docker-compose.yml --profile paper run --rm trading-paper kill-switch release
+docker compose -f docker/docker-compose.yml --profile paper run --rm trading-paper status
+docker compose -f docker/docker-compose.yml logs -f trading-paper
 ```
 
-Messages starting with `market data:` mean a poll brought nothing usable; the session keeps polling and trades nothing on that poll. `tests/isolation/test_trading_marketdata_live.py` (`JARVIS_TEST_DOCKER=1`) runs the committed workflow in a real n8n behind the gateway.
+It polls every 60 s; outside US market hours no new bars arrive and nothing trades. A one-off check that data arrives: `run --rm trading-paper paper-live --instrument SPY --once`. Messages starting with `market data:` mean a poll brought nothing usable; the session keeps polling and trades nothing on that poll. Account, kill switch, audit chain and recorded bars live in the `trading_paper_data` volume.
+
+`tests/isolation/test_trading_marketdata_live.py` (`JARVIS_TEST_DOCKER=1`) runs the committed workflow in a real n8n behind the gateway and the service image against it.
 
 ## Exit criterion and what is missing for it
 
 The roadmap asks for several weeks of paper trading without a risk-limit violation before a live key exists. The path is complete and tested (`tests/trading/`), and live bars arrive through n8n-trading. For a continuous paper run it still needs:
 
-- **A service.** A `trading-paper` container on `net-trading` (no egress) that runs `paper-live` and restarts with the stack. It changes `docker/`, a protected path.
+- **Time.** Several weeks of the `trading-paper` service without a risk-limit violation (`status`, and the audit chain in its volume).
 - **Deck integration.** The kill switch and daily P&L in the deck's top bar arrive with the orchestrator service that connects domains to the API gateway.

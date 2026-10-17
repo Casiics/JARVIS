@@ -23,6 +23,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.events import (
+    AuditAnchor,
     BoundaryEvent,
     ContextReviewDecided,
     ContextReviewRequested,
@@ -39,7 +40,8 @@ AnyEvent = Annotated[
     | TradingIdeaProposed
     | LifeTipProposed
     | ContextReviewRequested
-    | ContextReviewDecided,
+    | ContextReviewDecided
+    | AuditAnchor,
     Field(discriminator="kind"),
 ]
 _EVENT: TypeAdapter[AnyEvent] = TypeAdapter(AnyEvent)
