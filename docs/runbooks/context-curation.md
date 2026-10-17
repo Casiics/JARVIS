@@ -91,6 +91,22 @@ context pack to `curation/packs/<category>.md` for an agent's context window: st
 first, capped by `--max-chars`, headed by a line that marks everything as data, not
 instructions.
 
+## Feed curated context into an agent run
+
+A domain attaches its own curated context to an orchestrator work order:
+
+```python
+from jarvis_core.curation.context_input import select_context, with_context
+
+ctx = select_context(
+    store.entries(), domain=Domain.TRADING, ceiling=order.label, query="QQQ earnings"
+)
+order = with_context(order, ctx)  # pack becomes the first input, "curated_context"
+```
+
+Entries above the ceiling are left out. `with_context` refuses context from another domain, a
+pack labelled above the order, and reel-derived (external) context for an untainted task token.
+
 ## Categories
 
 Categories are configuration: `modules/mod-content/mod_content/curation/categories.yaml`, or

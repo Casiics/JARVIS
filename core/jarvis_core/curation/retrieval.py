@@ -48,11 +48,19 @@ def search(
 
 def render_pack(entries: Sequence[ContextEntry], *, domain: str, max_chars: int = 8000) -> str:
     """Markdown for an agent's context window, strongest entries first, cut at `max_chars`."""
+    return build_pack(entries, domain=domain, max_chars=max_chars)[0]
+
+
+def build_pack(
+    entries: Sequence[ContextEntry], *, domain: str, max_chars: int = 8000
+) -> tuple[str, list[ContextEntry]]:
+    """The rendered pack plus the entries that fit into it, in rendered order."""
     ranked = sorted(
         entries, key=lambda e: (-e.signal, -len(e.source_refs), -e.updated_at.timestamp())
     )
     parts = [PACK_HEADER.format(domain=domain), ""]
     used = sum(len(p) + 1 for p in parts)
+    included: list[ContextEntry] = []
     for entry in ranked:
         marker = " [external]" if entry.taint is Taint.EXTERNAL_CONTENT else ""
         block = [f"## [{entry.category}] {entry.title}{marker}", entry.summary]
@@ -62,5 +70,6 @@ def render_pack(entries: Sequence[ContextEntry], *, domain: str, max_chars: int 
         if used + len(text) > max_chars:
             break
         parts.append(text)
+        included.append(entry)
         used += len(text) + 1
-    return "\n".join(parts).rstrip() + "\n"
+    return "\n".join(parts).rstrip() + "\n", included
