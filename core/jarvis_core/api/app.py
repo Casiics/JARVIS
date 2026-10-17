@@ -68,6 +68,7 @@ from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntr
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.reel_url import InvalidReelUrl
 from jarvis_core.contracts.telemetry import TelemetryEvent
+from jarvis_core.management.delegation import DelegationAgent, DelegationResult
 from jarvis_core.orchestrator.service import Orchestrator, TaskRecord
 
 SESSION_COOKIE = "jarvis_session"
@@ -129,6 +130,7 @@ class GatewayDeps:
     reels: ReelDesk | None = None
     orchestrator: Orchestrator | None = None
     context_reviews: ContextReviewDesk | None = None
+    delegation: DelegationAgent | None = None
 
 
 # --- request bodies ---------------------------------------------------------------------------
@@ -154,6 +156,10 @@ class ApprovalOptionsBody(_Body):
 
 class ReelBody(_Body):
     url: str = Field(max_length=500)
+
+
+class RequestBody(_Body):
+    text: str = Field(min_length=1, max_length=2000)
 
 
 class ContextDecisionBody(_Body):
@@ -498,6 +504,25 @@ def create_app(settings: GatewaySettings, deps: GatewayDeps) -> FastAPI:
         deps.orchestrator.tick()
         return {"tasks": [_task(t) for t in deps.orchestrator.tasks()[:100]]}
 
+    # --- management: requests in plain words -----------------------------------------------
+
+    @app.post("/api/requests")
+    def delegate_request(body: RequestBody, request: Request) -> dict[str, Any]:
+        """The delegation agent picks the specialised agent; the orchestrator dispatches."""
+        session = session_of(request)
+        if deps.delegation is None:
+            raise HTTPException(503, "the delegation agent is not configured")
+        result = deps.delegation.delegate(body.text, actor=f"user:{session.user_id}")
+        audit(
+            f"core:delegation:{result.status.value}",
+            AuditDecision.ALLOW if result.task_id else AuditDecision.ESCALATE,
+            action=AuditAction.BOUNDARY_EVENT,
+            actor=f"user:{session.user_id}",
+            task_id=result.task_id,
+            content_hash=sha256_hex(body.text),
+        )
+        return {"result": _delegation(result)}
+
     # --- context reviews ------------------------------------------------------------------
 
     def review_desk() -> ContextReviewDesk:
@@ -639,6 +664,18 @@ def _reel(submission: ReelSubmission) -> dict[str, Any]:
         "updated_at": submission.updated_at.isoformat(),
         "duration_ms": submission.duration_ms,
         "error_class": submission.error_class,
+    }
+
+
+def _delegation(result: DelegationResult) -> dict[str, Any]:
+    return {
+        "status": result.status.value,
+        "route": result.route,
+        "domain": result.domain.value if result.domain else None,
+        "task_id": str(result.task_id) if result.task_id else None,
+        "reason": result.reason,
+        "error_class": result.error_class,
+        "used_model": result.used_model,
     }
 
 

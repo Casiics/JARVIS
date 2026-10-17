@@ -18,6 +18,7 @@ from jarvis_core.contracts.task_token import Ed25519TokenVerifier, public_key_he
 from jarvis_core.contracts.telemetry import TelemetryEvent, TelemetryState
 from jarvis_core.orchestrator.service import (
     DEFAULT_DEADLINE,
+    Goal,
     Orchestrator,
     ReelDispatcher,
     ReelGoal,
@@ -193,7 +194,8 @@ def test_a_dispatch_the_flow_policy_refuses_records_nothing(h: Harness) -> None:
         tools = frozenset({"sandbox.fetch"})
         taint = Taint.NONE
 
-        def event(self, goal: ReelGoal, task_id: UUID, token: str | None) -> BoundaryEvent:
+        def event(self, goal: Goal, task_id: UUID, token: str | None) -> BoundaryEvent:
+            assert isinstance(goal, ReelGoal)
             return ReelSubmitted(
                 origin_domain=Domain.CORE,
                 target_domain=Domain.TRADING,
