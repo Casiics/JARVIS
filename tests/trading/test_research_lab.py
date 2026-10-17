@@ -244,7 +244,7 @@ def test_unknown_instruments_go_back_to_the_researcher(tmp_path: Path) -> None:
 def test_the_ledger_command_lists_what_was_tested(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from trading_research.__main__ import main
+    from trading_agents.lab import main
 
     lab, _ = make_lab(tmp_path / "research", Scripted([MOMENTUM]), margin=-10.0)
     lab.run()

@@ -165,10 +165,10 @@ def test_backtest_against_buy_and_hold_stays_within_limits(
     assert "risk " not in out, out  # no order was refused by the risk engine
     assert "kill switch trips 0" in out
     rows = {line.split()[0]: line.split()[1:] for line in out.splitlines()[-2:]}
-    assert set(rows) == {"trend_vol_target", "buy_and_hold"}
+    assert set(rows) == {"SPY/trend-vol", "SPY/hold"}
     # Through the crash the trend filter is out of the market for most of the fall.
     drawdown = {name: float(cols[-1].rstrip("%")) for name, cols in rows.items()}
-    assert drawdown["trend_vol_target"] < drawdown["buy_and_hold"]
+    assert drawdown["SPY/trend-vol"] < drawdown["SPY/hold"]
 
 
 def test_sweep_shows_the_grid_next_to_buy_and_hold(

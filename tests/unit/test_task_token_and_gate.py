@@ -79,3 +79,51 @@ def test_untainted_reversible_action_runs() -> None:
     assert decide(_request(task_id, "save_draft", ApprovalTier.B), claims).outcome is (
         GateOutcome.EXECUTE
     )
+
+
+def test_signed_tokens_verify_with_the_public_key_only() -> None:
+    from uuid import uuid4
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from jarvis_core.contracts.task_token import (
+        Ed25519TokenVerifier,
+        issue_signed_token,
+        load_signing_key,
+        load_verify_key,
+        public_key_hex,
+    )
+
+    key = load_signing_key("11" * 32)
+    token = issue_signed_token(
+        key,
+        task_id=uuid4(),
+        domain=Domain.CONTENT,
+        allowed_tools=frozenset({"sandbox.fetch"}),
+        budget_eur=0.0,
+    )
+    verifier = Ed25519TokenVerifier(load_verify_key(public_key_hex(key)))
+    assert verifier.verify(token).domain is Domain.CONTENT
+
+    body, signature = token.removeprefix("ed25519.").split(".")
+    widened = body[:-4] + ("AAAA" if body[-4:] != "AAAA" else "BBBB")
+    with pytest.raises(TaskTokenError):
+        verifier.verify(f"ed25519.{widened}.{signature}")
+    other = Ed25519TokenVerifier(Ed25519PrivateKey.from_private_bytes(b"x" * 32).public_key())
+    with pytest.raises(TaskTokenError, match="signature"):
+        other.verify(token)
+    # Signed tokens never pass the HMAC path, and HMAC tokens never pass the signed one.
+    with pytest.raises(TaskTokenError):
+        verify_token(b"k" * 32, token)
+    with pytest.raises(TaskTokenError, match="not signed by core"):
+        verifier.verify(
+            issue_token(
+                b"k" * 32,
+                task_id=uuid4(),
+                domain=Domain.CONTENT,
+                allowed_tools=frozenset(),
+                budget_eur=0.0,
+            )
+        )
+    with pytest.raises(TaskTokenError):
+        load_signing_key("abcd")

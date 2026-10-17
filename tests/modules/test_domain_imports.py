@@ -1,8 +1,8 @@
 """Each domain package imports only jarvis_core, itself, the stdlib and pydantic.
 
 The trading risk engine is stricter: it may not import jarvis_core or the trading module, so it
-can be reviewed as a closed unit. Trading research may reach the model router, but the trading
-module may not import it, so nothing a model writes can reach the order path.
+can be reviewed as a closed unit. Trading's model-backed agents live in their own package,
+`trading_agents`, which the executor and the risk engine never import.
 """
 
 from __future__ import annotations
@@ -20,12 +20,11 @@ PACKAGES = {
         MODULES / "mod-trading/mod_trading",
         {"jarvis_core", "mod_trading", "trading_risk"},
     ),
-    "trading_risk": (MODULES / "mod-trading/risk/trading_risk", {"trading_risk"}),
-    # Research workers may call models; mod_trading may not import them (not in its set).
-    "trading_research": (
-        MODULES / "mod-trading/trading_research",
-        {"jarvis_core", "mod_trading", "trading_research"},
+    "trading_agents": (
+        MODULES / "mod-trading/trading_agents",
+        {"jarvis_core", "mod_trading", "trading_agents"},
     ),
+    "trading_risk": (MODULES / "mod-trading/risk/trading_risk", {"trading_risk"}),
 }
 
 
@@ -58,3 +57,9 @@ def test_trading_never_reads_secrets_or_calls_models() -> None:
             text = file.read_text(encoding="utf-8")
             assert "SecretProvider" not in text and "/run/jarvis/secrets" not in text
             assert "jarvis_core.router" not in text, f"{file.name} reaches the model router"
+
+
+def test_the_executor_and_risk_engine_never_import_trading_agents() -> None:
+    for package in ("mod_trading", "trading_risk"):
+        for file in PACKAGES[package][0].rglob("*.py"):
+            assert "trading_agents" not in _imports(file), f"{package}/{file.name}"

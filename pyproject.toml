@@ -11,7 +11,8 @@ dependencies = [
 [project.optional-dependencies]
 db = ["psycopg[binary]>=3.2,<4"]
 # API gateway for the command deck (core, net-gateway). Domain workers do not need it.
-gateway = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "websockets>=15,<17", "webauthn>=3.0,<4"]
+# cryptography: the task router signs task tokens with Ed25519.
+gateway = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "websockets>=15,<17", "webauthn>=3.0,<4", "cryptography>=45,<51"]
 # Git gateway (core): signs GitHub App JWTs.
 gitgateway = ["cryptography>=45,<51"]
 # Audit checkpoints and WORM export (Ed25519 signatures).
@@ -42,8 +43,8 @@ packages = [
     "modules/mod-content/mod_content",
     "modules/mod-private/mod_private",
     "modules/mod-trading/mod_trading",
+    "modules/mod-trading/trading_agents",
     "modules/mod-trading/risk/trading_risk",
-    "modules/mod-trading/trading_research",
 ]
 
 # Editable installs put each package's parent on sys.path (the risk engine sits one level deeper).
@@ -70,7 +71,7 @@ known-first-party = [
     "mod_content",
     "mod_private",
     "mod_trading",
-    "trading_research",
+    "trading_agents",
     "trading_risk",
 ]
 
@@ -90,7 +91,7 @@ packages = [
     "mod_content",
     "mod_private",
     "mod_trading",
-    "trading_research",
+    "trading_agents",
     "trading_risk",
 ]
 exclude = ["modules/mod-content/sandbox/"]

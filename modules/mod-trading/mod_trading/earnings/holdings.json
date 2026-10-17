@@ -1,0 +1,31 @@
+{
+  "as_of": "2025-09-30",
+  "note": "Approximate weights of the largest holdings, rounded; refresh from the issuers' published holdings files before relying on them. IWM has no holding above about 1 %, so no single report moves it.",
+  "etfs": {
+    "SPY": [
+      {"symbol": "NVDA", "weight": 0.075},
+      {"symbol": "MSFT", "weight": 0.067},
+      {"symbol": "AAPL", "weight": 0.064},
+      {"symbol": "AMZN", "weight": 0.039},
+      {"symbol": "META", "weight": 0.029},
+      {"symbol": "AVGO", "weight": 0.027},
+      {"symbol": "GOOGL", "weight": 0.024},
+      {"symbol": "GOOG", "weight": 0.020},
+      {"symbol": "TSLA", "weight": 0.022},
+      {"symbol": "BRK.B", "weight": 0.016}
+    ],
+    "QQQ": [
+      {"symbol": "NVDA", "weight": 0.095},
+      {"symbol": "MSFT", "weight": 0.085},
+      {"symbol": "AAPL", "weight": 0.080},
+      {"symbol": "AVGO", "weight": 0.055},
+      {"symbol": "AMZN", "weight": 0.055},
+      {"symbol": "META", "weight": 0.037},
+      {"symbol": "TSLA", "weight": 0.033},
+      {"symbol": "GOOGL", "weight": 0.031},
+      {"symbol": "GOOG", "weight": 0.029},
+      {"symbol": "NFLX", "weight": 0.025}
+    ],
+    "IWM": []
+  }
+}

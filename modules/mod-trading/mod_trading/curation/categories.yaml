@@ -5,6 +5,13 @@
 domain: trading
 default_category: general
 categories:
+  - name: market-regime
+    description: Computed daily regime snapshots of QQQ, SPY and IWM (replaced, never merged)
+    tags: [regime]
+    keywords: [regime, volatility, trend, average]
+    min_signal: 0.5
+    auto_store_at: 0.85
+    max_classification: private
   - name: index-etf
     description: QQQ, SPY, IWM and index strategies
     tags: [qqq, spy, iwm]

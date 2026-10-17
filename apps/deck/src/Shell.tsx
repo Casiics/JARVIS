@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { logout } from "./api";
+import { CommandPalette } from "./CommandPalette";
 import { DASHBOARDS } from "./dashboards";
 import { useEscalationCount } from "./live";
 import { useAttention } from "./useAttention";
@@ -51,7 +52,7 @@ export function Shell({ onSignedOut }: { onSignedOut: () => void }) {
               ⚠ {escalated} eskaliert (24 h)
             </Link>
           )}
-          <span className="muted">Kill-Switch und Tageskosten folgen mit dem Trading-Dienst</span>
+          <CommandPalette onSignedOut={onSignedOut} />
           <button
             type="button"
             className="ghost"

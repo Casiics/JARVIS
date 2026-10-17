@@ -28,7 +28,7 @@ changes what trades on paper; that stays a human step.
 
 This module never calls a model: the workers are handed in. The trading module stays free of
 the model router (`tests/modules/test_domain_imports.py`), so model output can never reach the
-order path. The command line that wires real workers lives in `trading_research`.
+order path. The command line that wires real workers lives in `trading_agents.lab`.
 """
 
 from __future__ import annotations

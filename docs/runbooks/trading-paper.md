@@ -55,6 +55,8 @@ Limits: edit `modules/mod-trading/risk/limits.json`. It is a protected path, so 
 
 Ideas from the content domain (`TradingIdeaProposed`) enter through the boundary policy and keep their taint (`mod_trading.inbox`). `python -m mod_trading ideas` lists them. They are notes for review and have no path to the executor.
 
+`python -m trading_agents review-ideas` (its own package, so the executor stays free of model calls) assesses open ideas with local agents through core's supervisor-worker loop: a worker writes a typed assessment (`research`, `watch` or `dismiss`, the instruments, a rationale and risks), Tier 0b checks it deterministically (only tickers the idea itself names, a research verdict needs an instrument), and a local supervisor does the QA, at most four tries per idea. Hermes Agent is the runtime when the `hermes` binary is installed (`--runtime auto`, the default); otherwise plain gateway completions run the same loop. Both use local models only. Assessments land in `assessments.json` next to the inbox, and `python -m trading_agents ideas` shows each idea's latest verdict. The token is tainted and allows the loop's two steps only, so a review can never place an order or dismiss an idea; the owner decides.
+
 ## Baseline strategy: trend filter plus volatility target
 
 `--strategy trend-vol` (`mod_trading.strategies.TrendVolTarget`) is the rule-based baseline every later strategy has to beat. Long only, one instrument:
@@ -94,6 +96,23 @@ buy_and_hold        2152.07%    8.87%   12.26%    0.76   50.82%
 
 About one percentage point of yearly return given up for less than half of the worst loss and a better Sharpe ratio. On the paper account the same run stays far smaller (CAGR 1.5 %), because the risk limits cap the position at 2500 and the strategy keeps its capital fixed instead of compounding; that is intended until the limits are raised by a human. Daily SPY data from `history` will replace the monthly proxy.
 
+## Basket: SPY, QQQ and IWM
+
+A comma-separated `--instrument` trades a basket: one baseline per instrument, each with its own `--capital` sleeve, all on one paper account under one set of risk limits. Each member sees only its own bars.
+
+```bash
+for s in SPY QQQ IWM; do python -m mod_trading history --instrument $s --out ${s,,}-daily.csv; done
+python -m mod_trading backtest --bars spy-daily.csv qqq-daily.csv iwm-daily.csv \
+  --instrument SPY,QQQ,IWM --strategy trend-vol --compare
+python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument SPY,QQQ --strategy trend-vol
+```
+
+- `--compare` prints the account, then each instrument's signal next to holding it, then the basket (equal sleeves, rebalanced every bar) next to holding the basket, and the correlation of returns per pair. Bars are aligned on the timestamps all instruments share.
+- **Correlation decides what a basket is worth.** SPY and QQQ typically correlate around 0.9 on daily returns, so two sleeves of them are closer to one bet than to two. IWM (small caps) diversifies more, but less than one might hope in a crash, when correlations rise together.
+- **Order rate:** `max_orders_per_minute` is per account and members trade on the same minute, so they share it (three a minute: one per member of a three-member basket). A larger rebalance then takes a few bars. A basket larger than the order rate is refused.
+- **Exposure:** three sleeves of 2400 make 7200, inside `max_gross_exposure` (8000). Raising `--capital` per sleeve needs the limits raised first, by a human.
+- **IWM is not on the risk engine's instrument allowlist** (`modules/mod-trading/risk/limits.json`, a protected path). Backtests with `--compare` and the research gate show IWM's signal, but no IWM orders are proposed (`IWM: not on the risk allowlist, no orders`) until a human adds it there; a basket including IWM trades only SPY and QQQ meanwhile.
+
 ## Research gate
 
 Ideas from research agents (market researcher, earnings reviewer) are signals: a weight between 0 and 1 per bar, written as CSV `ts,weight`. Before a signal may trade on paper, `research-gate` compares it with the trend-vol baseline on the same bars, both as compounding weight curves with the same costs:
@@ -116,11 +135,26 @@ Research agents never write code and never trade. They work in the supervisor-wo
 6. A spec that passes the holdout becomes a **paper candidate** in `<data-dir>/research/candidates/` (spec JSON and a `ts,weight` file for `research-gate`). Putting it on the paper account stays a human step.
 
 ```bash
-uv run python -m trading_research --data-dir /var/lib/jarvis/trading run --bars spy-daily.csv qqq-daily.csv --ollama-url http://localhost:11434
-uv run python -m trading_research --data-dir /var/lib/jarvis/trading ledger
+uv run python -m trading_agents.lab --data-dir /var/lib/jarvis/trading run --bars spy-daily.csv qqq-daily.csv --ollama-url http://localhost:11434
+uv run python -m trading_agents.lab --data-dir /var/lib/jarvis/trading ledger
 ```
 
-The lab runs on local models with a cloud budget of zero. The model wiring lives in its own package, `trading_research`; `mod_trading` itself never reaches the model router and may not import that package (`tests/modules/test_domain_imports.py`), so nothing a model writes can reach the order path. Market prices are public, so a later switch to a cloud model class is a routing decision, not a privacy one.
+The lab runs on local models with a cloud budget of zero. The model wiring lives in `trading_agents.lab`; `mod_trading` itself never reaches the model router and may not import `trading_agents` (`tests/modules/test_domain_imports.py`), so nothing a model writes can reach the order path. Market prices are public, so a later switch to a cloud model class is a routing decision, not a privacy one.
+
+## Exposure brakes: earnings and (later) social media
+
+A brake caps the weight the trend-vol baseline may hold in one instrument until a point in time (`mod_trading.brakes`). Brakes only lower exposure: `max_weight` is below 1, there is no field that buys, and an expired brake simply stops applying. The tightest active brake wins. `paper` and `paper-live` read `<data-dir>/brakes.json` on every bar, so a brake added from the command line reaches a running session at its next bar; an unreadable file allows no exposure (fail closed).
+
+```bash
+python -m mod_trading brakes add QQQ 0.3 --hours 6 --reason "CPI release"
+python -m mod_trading brakes earnings --calendar earnings.csv     # symbol,date
+python -m mod_trading brakes list
+python -m mod_trading backtest --bars qqq-daily.csv --instrument QQQ --strategy trend-vol --earnings-calendar earnings.csv
+```
+
+**Earnings.** SPY and QQQ are weighted by market value, so a few companies move them. `modules/mod-trading/mod_trading/earnings/holdings.json` lists the largest holdings with approximate weights (refresh them from the issuers' holdings files). When reports of holdings that together weigh at least 10 % of an ETF fall within a day or two of each other, the ETF is capped at 0.5 from the day before the first report to the day after the last. Example: Microsoft and Meta on consecutive days are about 12 % of QQQ and brake it, but under 10 % of SPY and do not. IWM has no holding above about 1 %, so earnings never brake it. This is a deterministic rule on purpose: whether a report is good is unknowable before it is published, so the only defensible reaction is to hold less through it. Report dates come from a calendar CSV until a source for them is added to n8n-trading (that needs a new egress host and tool, both protected paths).
+
+**Social media (planned, not built).** A burst of attention on an instrument is a reason to hold less, never a buy signal. The content domain would send a typed boundary event (for example `TradingRiskAlert`: instrument, intensity, window) that `jarvis_core.policy.flows` lets through to trading only, and trading turns it into a brake with `source: social` and a short expiry. The event type can be added freely, but the flow rule lives in a protected path (`core/jarvis_core/policy/`) and waits for a human decision.
 
 ## Live market data
 
@@ -152,20 +186,26 @@ docker compose -f docker/docker-compose.yml up -d n8n-trading opa-trading mcp-ga
 docker compose -f docker/docker-compose.yml restart opa-trading egress-trading
 ```
 
-### Run
+### Run as a service
 
-`paper-live` must run where `mcp-gateway-trading` resolves, which is `net-trading`. It polls every 60 s (`--poll-s`); `--once` polls a single time, which is the quickest check that data arrives.
+`trading-paper` runs `paper-live` around the clock on `net-trading`, with the baseline strategy on SPY by default (`JARVIS_PAPER_INSTRUMENT`, `JARVIS_PAPER_STRATEGY`). It sits behind the `paper` profile, so a plain `up -d` never starts trading.
 
 ```bash
-python -m mod_trading --data-dir /var/lib/jarvis/trading kill-switch release
-python -m mod_trading --data-dir /var/lib/jarvis/trading paper-live --instrument SPY
+docker compose -f docker/docker-compose.yml --profile paper build trading-paper
+docker compose -f docker/docker-compose.yml --profile paper up -d trading-paper
+# The kill switch starts engaged; the service waits until you release it:
+docker compose -f docker/docker-compose.yml --profile paper run --rm trading-paper kill-switch release
+docker compose -f docker/docker-compose.yml --profile paper run --rm trading-paper status
+docker compose -f docker/docker-compose.yml logs -f trading-paper
 ```
 
-Messages starting with `market data:` mean a poll brought nothing usable; the session keeps polling and trades nothing on that poll. `tests/isolation/test_trading_marketdata_live.py` (`JARVIS_TEST_DOCKER=1`) runs the committed workflow in a real n8n behind the gateway.
+It polls every 60 s; outside US market hours no new bars arrive and nothing trades. A one-off check that data arrives: `run --rm trading-paper paper-live --instrument SPY --once`. Messages starting with `market data:` mean a poll brought nothing usable; the session keeps polling and trades nothing on that poll. Account, kill switch, audit chain and recorded bars live in the `trading_paper_data` volume.
+
+`tests/isolation/test_trading_marketdata_live.py` (`JARVIS_TEST_DOCKER=1`) runs the committed workflow in a real n8n behind the gateway and the service image against it.
 
 ## Exit criterion and what is missing for it
 
 The roadmap asks for several weeks of paper trading without a risk-limit violation before a live key exists. The path is complete and tested (`tests/trading/`), and live bars arrive through n8n-trading. For a continuous paper run it still needs:
 
-- **A service.** A `trading-paper` container on `net-trading` (no egress) that runs `paper-live` and restarts with the stack. It changes `docker/`, a protected path.
+- **Time.** Several weeks of the `trading-paper` service without a risk-limit violation (`status`, and the audit chain in its volume).
 - **Deck integration.** The kill switch and daily P&L in the deck's top bar arrive with the orchestrator service that connects domains to the API gateway.

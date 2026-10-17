@@ -1,8 +1,8 @@
 """Run a research session with workers on the local models.
 
-    uv run python -m trading_research --data-dir /var/lib/jarvis/trading \\
+    uv run python -m trading_agents.lab --data-dir /var/lib/jarvis/trading \\
         run --bars spy-daily.csv qqq-daily.csv --ollama-url http://localhost:11434
-    uv run python -m trading_research --data-dir /var/lib/jarvis/trading ledger
+    uv run python -m trading_agents.lab --data-dir /var/lib/jarvis/trading ledger
 
 `run` uses local models only and a cloud budget of zero. What the workers propose is judged
 by `mod_trading.lab`; candidates land in `<data-dir>/research/candidates/`, never on the
@@ -38,7 +38,7 @@ from mod_trading.signals import describe
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m trading_research")
+    parser = argparse.ArgumentParser(prog="python -m trading_agents.lab")
     parser.add_argument("--data-dir", type=Path, default=Path("/var/lib/jarvis/trading"))
     sub = parser.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run", help="one research session on local models")
