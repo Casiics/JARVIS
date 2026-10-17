@@ -83,3 +83,13 @@ Domain processes keep their own hash-chained audit file because they cannot reac
 An anchor with fewer entries than the last one, or the same count with a different head, means the local file was truncated or rewritten. It is logged as a `deny` with `policy_id = audit-anchor-rollback`, and the last good head stays the reference. To check a file by hand against any anchor from the central log, use `jarvis_core.boundary.anchor.matches_anchor(entries, count, head_hash)`.
 
 The trading executor and the private assistant can send anchors the same way (`jarvis_core.boundary.anchor.anchor_event`) once they run with a boundary mailbox.
+
+## Management layer: delegation
+
+`POST /api/requests {"text": "..."}` hands an owner's request in plain words to the delegation agent (`jarvis_core/management/delegation.py`). A local model (Hermes when installed, else the gateway; `--agent-runtime`, `--ollama-url`) picks one route from the orchestrator's catalogue: `reel` (content) or a predefined job (`private.daily_briefing`, `trading.paper_check`). Tier 0b checks the choice (the route exists; a reel link must appear verbatim in the request), a local supervisor reviews it, and deterministic code builds the typed goal. A request that is only a reel link skips the model.
+
+Results: `dispatched` (with the task id), `already_running`, `unclear` (no route fits, or the models were unavailable; `error_class` says which), and `needs_approval`: the route exists but `policy/flows.py` does not allow `TaskAssigned` from core to that domain yet. Trading and private jobs answer `needs_approval` until a human adds that rule; nothing is sent meanwhile.
+
+Domains run their jobs with `jarvis_core.orchestrator.jobs.JobServer`: one handler per job, `running` then the final state reported to core as metadata.
+
+Decisions are written to the shared memory (`<data-dir>/memory/core.jsonl`, topic `delegation`), and lessons (topic `lesson:*`) are read back into the next decision. `jarvis_core.management.memory.MemoryPort` is the interface the context pipeline's memory manager implements.

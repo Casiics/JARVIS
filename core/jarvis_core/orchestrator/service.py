@@ -33,10 +33,13 @@ from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditAction, AuditDecision, AuditLogEntry
 from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import (
+    JOB_DOMAIN,
     AuditAnchor,
     BoundaryEvent,
+    Job,
     ReelSubmitted,
     Taint,
+    TaskAssigned,
     TaskMetadata,
 )
 from jarvis_core.contracts.reel_url import canonical_reel_url
@@ -44,6 +47,7 @@ from jarvis_core.contracts.task_token import issue_signed_token
 from jarvis_core.contracts.telemetry import TelemetryEvent, TelemetryState
 from jarvis_core.orchestrator.anchors import AnchorBook, AnchorVerdict
 from jarvis_core.orchestrator.state_machine import TaskState
+from jarvis_core.policy.flows import check_flow
 from jarvis_core.storage import write_atomic
 
 if TYPE_CHECKING:
@@ -80,7 +84,21 @@ class ReelGoal(BaseModel):
         return canonical_reel_url(value)
 
 
-Goal = Annotated[ReelGoal, Field(discriminator="kind")]
+class JobGoal(BaseModel):
+    """Run one of a domain's predefined jobs (`contracts.events.Job`), e.g. the daily briefing."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["job"] = "job"
+    job: Job
+
+
+Goal = Annotated[ReelGoal | JobGoal, Field(discriminator="kind")]
+
+
+def route_key(goal: Goal) -> str:
+    """The task router's key: the goal kind, or the job name for jobs."""
+    return goal.job.value if isinstance(goal, JobGoal) else goal.kind
 
 
 class Dispatcher(Protocol):
@@ -111,6 +129,8 @@ class ReelDispatcher:
     taint = Taint.EXTERNAL_CONTENT
 
     def event(self, goal: Goal, task_id: UUID, token: str | None) -> BoundaryEvent:
+        if not isinstance(goal, ReelGoal):
+            raise UnroutableGoal(goal.kind)
         return ReelSubmitted(
             origin_domain=Domain.CORE,
             target_domain=Domain.CONTENT,
@@ -145,13 +165,51 @@ class TaskTokenIssuer:
         )
 
 
-# The task router: one goal kind, one domain. New kinds need a boundary event that
-# core/jarvis_core/policy/flows.py allows from core to that domain (a human change).
-ROUTES: dict[str, Dispatcher] = {"reel": ReelDispatcher()}
+class JobDispatcher:
+    """Sends a `TaskAssigned` for one job to the one domain that owns it."""
+
+    # A job reads only its own domain's data, so its token starts untainted and allows exactly
+    # that job; the domain's job server checks it before running the handler.
+    taint = Taint.NONE
+
+    def __init__(self, job: Job) -> None:
+        self.job = job
+        self.domain = JOB_DOMAIN[job]
+        self.tools = frozenset({f"job:{job.value}"})
+
+    def event(self, goal: Goal, task_id: UUID, token: str | None) -> BoundaryEvent:
+        if not isinstance(goal, JobGoal) or goal.job is not self.job:
+            raise UnroutableGoal(route_key(goal))
+        return TaskAssigned(
+            origin_domain=Domain.CORE,
+            target_domain=self.domain,
+            classification=DataClassification.INTERNAL,
+            task_id=task_id,
+            job=self.job,
+            task_token=token,
+        )
+
+
+# The task router: one route, one domain. Every route needs a boundary event that
+# core/jarvis_core/policy/flows.py allows from core to that domain (a human change); a route
+# the policy does not allow yet fails closed in `submit()` and records nothing.
+ROUTES: dict[str, Dispatcher] = {
+    "reel": ReelDispatcher(),
+    **{job.value: JobDispatcher(job) for job in Job},
+}
 
 
 class UnroutableGoal(Exception):
     pass
+
+
+def route_allowed(key: str) -> bool:
+    """Whether the flow policy lets core start this route today (a dry run, nothing is sent)."""
+    dispatcher = ROUTES.get(key)
+    if not isinstance(dispatcher, JobDispatcher):
+        return dispatcher is not None
+    probe = dispatcher.event(JobGoal(job=dispatcher.job), UUID(int=0), None)
+    return check_flow(probe, caller_domain=Domain.CORE).allowed
 
 
 # --- task records ---------------------------------------------------------------------------
@@ -230,16 +288,17 @@ class Orchestrator:
 
     def submit(self, goal: Goal, *, actor: str = ACTOR) -> TaskRecord:
         """Route a goal to its domain and send the one event that starts it there."""
-        dispatcher = self._routes.get(goal.kind)
+        key = route_key(goal)
+        dispatcher = self._routes.get(key)
         if dispatcher is None:
-            raise UnroutableGoal(goal.kind)
+            raise UnroutableGoal(key)
         task_id = uuid4()
         now = self._clock()
         token = None if self._tokens is None else self._tokens.issue(dispatcher, task_id, now)
         event = dispatcher.event(goal, task_id, token)
         record = TaskRecord(
             task_id=task_id,
-            kind=goal.kind,
+            kind=key,
             domain=dispatcher.domain,
             ref_hash=goal_hash(goal),
             created_at=now,
@@ -252,7 +311,7 @@ class Orchestrator:
             self._save()
         self._audit_entry(
             record,
-            f"dispatch:{goal.kind}->{dispatcher.domain.value}",
+            f"dispatch:{key}->{dispatcher.domain.value}",
             AuditDecision.ALLOW,
             actor=actor,
             action=AuditAction.BOUNDARY_EVENT,
@@ -267,9 +326,10 @@ class Orchestrator:
         Sends nothing: the domain already has the task. Without this, reports for such tasks
         would be ignored as unknown and the task would look open forever.
         """
-        dispatcher = self._routes.get(goal.kind)
+        key = route_key(goal)
+        dispatcher = self._routes.get(key)
         if dispatcher is None:
-            raise UnroutableGoal(goal.kind)
+            raise UnroutableGoal(key)
         now = self._clock()
         with self._lock:
             known = self._tasks.get(task_id)
@@ -277,7 +337,7 @@ class Orchestrator:
                 return known
             record = TaskRecord(
                 task_id=task_id,
-                kind=goal.kind,
+                kind=key,
                 domain=dispatcher.domain,
                 ref_hash=goal_hash(goal),
                 created_at=created_at,
@@ -286,9 +346,7 @@ class Orchestrator:
             )
             self._tasks[task_id] = record
             self._save()
-        self._audit_entry(
-            record, f"adopt:{goal.kind}->{dispatcher.domain.value}", AuditDecision.ALLOW
-        )
+        self._audit_entry(record, f"adopt:{key}->{dispatcher.domain.value}", AuditDecision.ALLOW)
         return record
 
     def sync(self) -> list[TaskRecord]:
@@ -338,6 +396,12 @@ class Orchestrator:
     def tick(self) -> list[TaskRecord]:
         """One pass of the service loop: reports first, then deadlines."""
         return self.sync() + self.expire()
+
+    def open_task(self, key: str) -> TaskRecord | None:
+        """The newest unsettled task on a route, e.g. to refuse starting a job twice."""
+        with self._lock:
+            open_ = [t for t in self._tasks.values() if t.kind == key and not t.settled]
+        return max(open_, key=lambda t: t.created_at, default=None)
 
     def get(self, task_id: UUID) -> TaskRecord | None:
         with self._lock:

@@ -12,6 +12,7 @@ net-gateway only.
 from __future__ import annotations
 
 import argparse
+import os
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,7 @@ from jarvis_core.boundary.mailbox import Mailbox
 from jarvis_core.contracts.audit import AuditLogEntry
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.task_token import load_signing_key, public_key_hex
+from jarvis_core.management.delegation import build_delegation
 from jarvis_core.orchestrator.anchors import AnchorBook
 from jarvis_core.orchestrator.service import Orchestrator, TaskTokenIssuer, run_forever
 from jarvis_core.secrets.provider import SecretAccessError, UnpackedSopsProvider
@@ -63,6 +65,12 @@ def main(argv: list[str] | None = None) -> None:
         help="mailboxes shared with the domain processes (reel intake)",
     )
     parser.add_argument("--tick-seconds", type=float, default=2.0, help="orchestrator poll")
+    parser.add_argument(
+        "--ollama-url",
+        default=os.environ.get("JARVIS_OLLAMA_URL", "http://ollama:11434"),
+        help="local models for the management agents",
+    )
+    parser.add_argument("--agent-runtime", choices=["auto", "hermes", "gateway"], default="auto")
     args = parser.parse_args(argv)
 
     secrets = UnpackedSopsProvider(Domain.CORE, root=args.secrets_root)
@@ -100,13 +108,22 @@ def main(argv: list[str] | None = None) -> None:
         approvals=FileApprovalStore(args.data_dir / "approvals.json"),
         audit=audit,
         telemetry=telemetry,
-        reels=ReelDesk(orchestrator, args.data_dir / "reels.json", clock=clock),
+        reels=(desk := ReelDesk(orchestrator, args.data_dir / "reels.json", clock=clock)),
         orchestrator=orchestrator,
     )
     # Domain reports reach the deck's live view without anyone polling the API.
     threading.Thread(
         target=run_forever, args=(orchestrator, args.tick_seconds), daemon=True
     ).start()
+
+    deps.delegation = build_delegation(
+        orchestrator,
+        data_dir=args.data_dir,
+        ollama_url=args.ollama_url,
+        audit=audit,
+        runtime_choice=args.agent_runtime,
+        reels=lambda url: desk.submit(url)[0].task_id,
+    )
 
     # Own mailbox root: the reel desk consumes every letter in the main content-to-core box.
     deps.context_reviews = ContextReviewDesk(
