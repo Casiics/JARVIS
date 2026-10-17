@@ -104,6 +104,21 @@ python -m mod_trading research-gate --bars spy-daily.csv --signal idea.csv --ins
 
 It is accepted only if its Sharpe ratio beats the baseline's by at least 0.10 on the whole period and on the second half (out of sample), and its drawdown is at most 5 points worse. Exit code 0 means accepted, 1 rejected (with reasons), 2 an invalid signal (weights outside 0 to 1, bars without a weight). Buying and holding fails it, and so does the baseline itself; deterministic code decides, no model. An accepted signal still trades only through the normal order path.
 
+## Exposure brakes: earnings and (later) social media
+
+A brake caps the weight the trend-vol baseline may hold in one instrument until a point in time (`mod_trading.brakes`). Brakes only lower exposure: `max_weight` is below 1, there is no field that buys, and an expired brake simply stops applying. The tightest active brake wins. `paper` and `paper-live` read `<data-dir>/brakes.json` on every bar, so a brake added from the command line reaches a running session at its next bar; an unreadable file allows no exposure (fail closed).
+
+```bash
+python -m mod_trading brakes add QQQ 0.3 --hours 6 --reason "CPI release"
+python -m mod_trading brakes earnings --calendar earnings.csv     # symbol,date
+python -m mod_trading brakes list
+python -m mod_trading backtest --bars qqq-daily.csv --instrument QQQ --strategy trend-vol --earnings-calendar earnings.csv
+```
+
+**Earnings.** SPY and QQQ are weighted by market value, so a few companies move them. `modules/mod-trading/mod_trading/earnings/holdings.json` lists the largest holdings with approximate weights (refresh them from the issuers' holdings files). When reports of holdings that together weigh at least 10 % of an ETF fall within a day or two of each other, the ETF is capped at 0.5 from the day before the first report to the day after the last. Example: Microsoft and Meta on consecutive days are about 12 % of QQQ and brake it, but under 10 % of SPY and do not. IWM has no holding above about 1 %, so earnings never brake it. This is a deterministic rule on purpose: whether a report is good is unknowable before it is published, so the only defensible reaction is to hold less through it. Report dates come from a calendar CSV until a source for them is added to n8n-trading (that needs a new egress host and tool, both protected paths).
+
+**Social media (planned, not built).** A burst of attention on an instrument is a reason to hold less, never a buy signal. The content domain would send a typed boundary event (for example `TradingRiskAlert`: instrument, intensity, window) that `jarvis_core.policy.flows` lets through to trading only, and trading turns it into a brake with `source: social` and a short expiry. Adding the event type and the flow rule changes protected paths and waits for a human decision.
+
 ## Live market data
 
 `paper-live` trades the same paper account on live 1-minute bars instead of a CSV:

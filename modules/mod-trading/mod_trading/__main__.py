@@ -7,9 +7,12 @@
     python -m mod_trading research-gate --bars spy-daily.csv --signal idea.csv --instrument SPY
     python -m mod_trading status
     python -m mod_trading kill-switch status|engage REASON|release
+    python -m mod_trading brakes list|add|earnings|prune               # exposure brakes
     python -m mod_trading ideas
 
 `backtest` replays bars against a fresh paper account with a released kill switch in memory.
+Exposure brakes (`mod_trading.brakes`) cap the trend-vol weight: from `<data-dir>/brakes.json`
+for `paper` and `paper-live`, from `--earnings-calendar` for a backtest.
 `paper-live` polls 1-minute bars from the n8n-trading MCP tool (mod_trading.marketdata) and
 trades them on the same paper account, against the wall clock, so stale data fails the risk
 engine's quote-age check. `paper` and `paper-live` keep account, equity tracker, kill switch
@@ -39,6 +42,16 @@ from jarvis_core.audit.file import FileAuditStore
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.task_token import TaskTokenClaims, issue_token, verify_token
 from mod_trading.account import EquityTracker
+from mod_trading.brakes import (
+    Brake,
+    BrakeBook,
+    BrakeError,
+    StaticBrakes,
+    describe,
+    earnings_brakes,
+    load_holdings,
+    read_calendar,
+)
 from mod_trading.broker import PaperBroker
 from mod_trading.executor import TRADING_TOOLS, OrderExecutor
 from mod_trading.feed import read_bars, replay
@@ -275,6 +288,38 @@ def history_csv(args: argparse.Namespace) -> int:
     return 0
 
 
+def brakes_command(args: argparse.Namespace) -> int:
+    book = BrakeBook(args.data_dir / "brakes.json")
+    now = datetime.now(UTC)
+    try:
+        if args.action == "add":
+            book.add(
+                [
+                    Brake(
+                        instrument=args.instrument.upper(),
+                        max_weight=args.max_weight,
+                        start=now,
+                        until=now + timedelta(hours=args.hours),
+                        source="manual",
+                        reason=args.reason,
+                    )
+                ]
+            )
+        elif args.action == "earnings":
+            planned = earnings_brakes(
+                load_holdings(), read_calendar(args.calendar), max_weight=args.max_weight
+            )
+            book.add(b for b in planned if b.until > now)
+        elif args.action == "prune":
+            print(f"{book.prune(now)} expired brakes removed")
+    except (BrakeError, ValueError) as exc:
+        print(f"brakes: {exc}", file=sys.stderr)
+        return 2
+    for line in describe(b for b in book.all() if b.until > now):
+        print(line)
+    return 0
+
+
 def _executor(
     args: argparse.Namespace,
     clock: Callable[[], datetime],
@@ -309,6 +354,13 @@ def _executor(
         audit=audit,
         clock=clock,
     )
+    cap = None
+    if persistent:
+        cap = BrakeBook(args.data_dir / "brakes.json").cap
+    elif getattr(args, "earnings_calendar", None):
+        cap = StaticBrakes(
+            earnings_brakes(load_holdings(), read_calendar(args.earnings_calendar))
+        ).cap
     strategy: Strategy
     if args.strategy == "trend-vol":
         strategy = TrendVolTarget(
@@ -321,6 +373,7 @@ def _executor(
             max_orders_per_bar=limits.max_orders_per_minute,
             quantity_step=args.step,
             bars_per_year=args.bars_per_year or bar_frequency,
+            cap=cap,
         )
     else:
         strategy = SmaCrossover(
@@ -377,6 +430,11 @@ def main(argv: list[str] | None = None) -> int:
                 "--compare", action="store_true", help="compare with buy-and-hold of --capital"
             )
             run.add_argument(
+                "--earnings-calendar",
+                type=Path,
+                help="symbol,date CSV: brake the ETFs around their heavy holdings' reports",
+            )
+            run.add_argument(
                 "--sweep",
                 action="store_true",
                 help="trend-vol over a grid of --trend and --target-vol, with buy-and-hold",
@@ -406,6 +464,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("status")
     sub.add_parser("ideas")
+    br = sub.add_parser("brakes", help="caps on exposure: list, add, earnings, prune")
+    br_sub = br.add_subparsers(dest="action", required=True)
+    br_sub.add_parser("list")
+    br_sub.add_parser("prune")
+    br_add = br_sub.add_parser("add")
+    br_add.add_argument("instrument")
+    br_add.add_argument("max_weight", type=float)
+    br_add.add_argument("--hours", type=float, default=24.0)
+    br_add.add_argument("--reason", default="manual")
+    br_earn = br_sub.add_parser("earnings")
+    br_earn.add_argument("--calendar", type=Path, required=True, help="symbol,date CSV")
+    br_earn.add_argument("--max-weight", type=float, default=0.5)
     ks = sub.add_parser("kill-switch")
     ks.add_argument("action", choices=["status", "engage", "release"])
     ks.add_argument("reason", nargs="?", default="manual")
@@ -422,6 +492,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "research-gate":
         return research_gate(args)
     data = args.data_dir
+    if args.command == "brakes":
+        return brakes_command(args)
     if args.command == "kill-switch":
         switch = KillSwitch(data / "killswitch")
         if args.action == "engage":
