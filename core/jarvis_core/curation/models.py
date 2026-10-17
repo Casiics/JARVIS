@@ -11,12 +11,15 @@ from jarvis_core.contracts.classification import DataClassification, Domain
 from jarvis_core.contracts.events import Taint
 
 ID_PATTERN = r"^[A-Za-z0-9:_.-]{1,120}$"
+SUBJECT_PATTERN = r"^[a-z0-9:_.-]{1,80}$"
 
 
 class CollectedItem(BaseModel):
     """Stage 1 output: one piece of raw material from a domain source.
 
     The classification defaults to PRIVATE so a source that forgets the label fails closed.
+    An item with a `subject` is a snapshot (for example computed market statistics): the newest
+    snapshot of a subject replaces the stored entry instead of being merged into it.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -34,6 +37,7 @@ class CollectedItem(BaseModel):
     signal: float = Field(ge=0.0, le=1.0, description="source-side usefulness estimate")
     flags: tuple[str, ...] = Field(default=(), description="e.g. prompt-injection markers")
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    subject: str | None = Field(default=None, pattern=SUBJECT_PATTERN)
 
 
 class Digest(BaseModel):
@@ -55,6 +59,7 @@ class Digest(BaseModel):
     signal: float = Field(ge=0.0, le=1.0)
     flags: tuple[str, ...]
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    subject: str | None = Field(default=None, pattern=SUBJECT_PATTERN)
 
     @property
     def corroboration(self) -> int:
@@ -124,6 +129,7 @@ class ContextEntry(BaseModel):
     version: int = Field(ge=1)
     created_at: datetime
     updated_at: datetime
+    subject: str | None = Field(default=None, pattern=SUBJECT_PATTERN)
 
 
 class CategoryRule(BaseModel):

@@ -3,6 +3,7 @@
 1. collect: accept items from domain sources, refuse anything from another domain or labelled
    SECRET, skip items already collected.
 2. consolidate: cluster exact and near duplicates and merge each cluster into one digest.
+   Snapshots (items with a subject) are grouped by subject instead; the newest one wins.
 3. prepare: pick the category, compare against the context already stored there and propose
    store, merge or discard with a confidence and its reasons.
 4. decide: deterministic policy. Confident proposals are applied automatically; uncertain,
@@ -101,6 +102,14 @@ class CurationPipeline:
         return digests
 
     def _clusters(self, items: list[CollectedItem]) -> list[list[CollectedItem]]:
+        snapshots: dict[str, list[CollectedItem]] = {}
+        for item in items:
+            if item.subject is not None:
+                snapshots.setdefault(item.subject, []).append(item)
+        loose = [i for i in items if i.subject is None]
+        return [*self._similar(loose), *snapshots.values()]
+
+    def _similar(self, items: list[CollectedItem]) -> list[list[CollectedItem]]:
         parent = list(range(len(items)))
 
         def find(i: int) -> int:
@@ -125,7 +134,11 @@ class CurationPipeline:
         return list(groups.values())
 
     def _digest(self, cluster: list[CollectedItem]) -> Digest:
-        ranked = sorted(cluster, key=lambda i: (-i.signal, i.collected_at, i.item_id))
+        subject = cluster[0].subject
+        if subject is None:
+            ranked = sorted(cluster, key=lambda i: (-i.signal, i.collected_at, i.item_id))
+        else:  # an older snapshot is superseded, not corroborating
+            ranked = sorted(cluster, key=lambda i: (-i.collected_at.timestamp(), i.item_id))[:1]
         best = ranked[0]
         member_ids = tuple(sorted(i.item_id for i in cluster))
         facts = unique([f for i in ranked for f in i.facts], MAX_FACTS)
@@ -142,13 +155,16 @@ class CurationPipeline:
             facts=facts,
             tags=unique([t for i in ranked for t in i.tags], MAX_TAGS),
             signal=best.signal,
-            flags=unique([f for i in ranked for f in i.flags], 20),
+            flags=unique([f for i in cluster for f in i.flags], 20),
             content_hash=fingerprint(best.summary, *facts),
+            subject=subject,
         )
 
     # --- stage 3 -----------------------------------------------------------------------------
 
     def prepare(self, digest: Digest, trace_id: str) -> DecisionBrief:
+        if digest.subject is not None:
+            return self._brief(self._prepare_snapshot(digest), trace_id)
         rule = self._category(digest)
         here = tokens(_text(digest.title, digest.summary, digest.facts))
         nearest: ContextEntry | None = None
@@ -197,13 +213,53 @@ class CurationPipeline:
             new_facts=new_facts,
             reasons=tuple(reasons),
         )
+        return self._brief(brief, trace_id)
+
+    def _prepare_snapshot(self, digest: Digest) -> DecisionBrief:
+        """A snapshot replaces the entry with the same subject; its confidence is its signal."""
+        rule = self._category(digest)
+        current = next(
+            (e for e in self.store.entries(rule.name) if e.subject == digest.subject), None
+        )
+        reasons = [f"category {rule.name}", f"snapshot of {digest.subject}"]
+        if digest.duplicates_dropped:
+            reasons.append(f"{digest.duplicates_dropped} older snapshot(s) superseded")
+        if digest.signal < rule.min_signal:
+            proposal, confidence = Proposal.DISCARD, 1.0 - digest.signal
+            reasons.append(f"signal below category minimum {rule.min_signal:.2f}")
+        elif current is not None and (current.summary, current.facts) == (
+            digest.summary,
+            digest.facts,
+        ):
+            proposal, confidence = Proposal.DISCARD, 1.0
+            reasons.append("unchanged since the stored snapshot")
+        elif current is not None:
+            proposal, confidence = Proposal.MERGE, digest.signal
+            reasons.append(f"replaces version {current.version}")
+        else:
+            proposal, confidence = Proposal.STORE, digest.signal
+            reasons.append("first snapshot")
+        return DecisionBrief(
+            brief_id="br:" + digest.digest_id.removeprefix("dg:"),
+            digest=digest,
+            category=rule.name,
+            proposal=proposal,
+            confidence=round(min(1.0, max(0.0, confidence)), 4),
+            novelty=0.0 if current else 1.0,
+            nearest_entry_id=current.entry_id if current else None,
+            nearest_similarity=1.0 if current else 0.0,
+            new_facts=digest.facts,
+            reasons=tuple(reasons),
+        )
+
+    def _brief(self, brief: DecisionBrief, trace_id: str) -> DecisionBrief:
         self._audit(
             "prepare",
             AuditDecision.ALLOW,
             trace_id,
             brief.brief_id,
-            digest.content_hash,
-            f"{proposal.value}:{rule.name}",
+            brief.digest.content_hash,
+            f"{brief.proposal.value}:{brief.category}",
         )
         return brief
 
@@ -284,9 +340,13 @@ class CurationPipeline:
                     version=1,
                     created_at=now,
                     updated_at=now,
+                    subject=digest.subject,
                 )
             )
             return Outcome.STORED
+        if digest.subject is not None:
+            self.store.put_entry(_replaced(existing, digest, now))
+            return Outcome.MERGED
         stronger = digest.signal > existing.signal
         self.store.put_entry(
             existing.model_copy(
@@ -399,6 +459,27 @@ class CurationPipeline:
                 content_ref=ref,
             )
         )
+
+
+def _replaced(existing: ContextEntry, digest: Digest, now: datetime) -> ContextEntry:
+    """The next version of a snapshot entry. Its label never drops below the stored one."""
+    return existing.model_copy(
+        update={
+            "classification": max(
+                existing.classification, digest.classification, key=lambda c: c.rank
+            ),
+            "taint": _taint((existing.taint, digest.taint)),
+            "title": digest.title,
+            "summary": digest.summary,
+            "facts": digest.facts,
+            "tags": digest.tags,
+            "source_refs": digest.source_refs,
+            "digest_ids": (*existing.digest_ids, digest.digest_id)[-20:],
+            "signal": digest.signal,
+            "version": existing.version + 1,
+            "updated_at": now,
+        }
+    )
 
 
 def _text(title: str, summary: str, facts: tuple[str, ...]) -> str:

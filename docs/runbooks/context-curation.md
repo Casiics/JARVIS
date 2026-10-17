@@ -23,6 +23,12 @@ uv run python -m mod_content.curation --data-dir ~/jarvis-data/content run --wat
 escalated runs have no artifact and are skipped.
 
 `--watch` re-runs the stages only when `runs.jsonl` or the notes inbox changed.
+A pass that fails (for example on a half-written file) is reported on stderr as an error class
+only and retried at the next poll; the watcher keeps running.
+
+For the local deck trial, `scripts/curation-local.sh` starts the watcher in a third terminal next
+to `scripts/deck-local.sh` and `scripts/reel-worker-local.sh`: each finished reel and each new
+note is curated within seconds, and reviews show up in the deck.
 
 ## Notes inbox (test without reels)
 
@@ -152,6 +158,24 @@ a higher signal. The inbox carries no label, so items fail closed to PRIVATE; tr
 stay in the terminal and never reach the deck. Thresholds are high on purpose: nothing from
 social media enters trading context without the owner. Curated notes are research context for
 trading's agents, never signals or orders.
+
+### Market regime snapshots
+
+Daily bars of QQQ, SPY and IWM become one `market-regime` entry per instrument: trend against
+the 50 and 200 day averages, 20 day realised volatility, distance from the one-year high, 20 day
+return and, for QQQ and IWM, the 20 day return against SPY. Plain arithmetic, no model.
+
+```bash
+for s in QQQ SPY IWM; do
+  uv run python -m mod_trading history --instrument $s --out ~/jarvis-data/trading/daily/$s.csv
+done
+uv run python -m mod_trading.curation --data-dir ~/jarvis-data/trading run
+uv run python -m mod_trading.curation --data-dir ~/jarvis-data/trading context --category market-regime
+```
+
+These are snapshots: an item with a `subject` replaces the stored entry of that subject (new
+version, old facts gone) instead of merging, an unchanged snapshot is discarded, and of several
+pending snapshots only the newest counts. In `--watch` mode a refreshed CSV triggers a new pass.
 
 ## Private domain (Life-OS)
 

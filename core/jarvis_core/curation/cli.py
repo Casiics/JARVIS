@@ -106,19 +106,29 @@ def run_cli(cli: DomainCli, argv: list[str] | None = None) -> int:
     bridge = cli.make_bridge(args, pipeline, store, root) if cli.make_bridge else None
     last_seen: tuple[tuple[str, int, int], ...] | None = None
     while True:
-        seen = inputs_signature(*cli.watched(data, root))
-        if seen != last_seen:  # a full pass only when an input changed
-            counts = pipeline.run(cli.sources(data, root))
-            last_seen = seen
-            if counts.collected or counts.rejected or not args.watch:
-                print(counts.model_dump_json(), flush=True)
-        if bridge is not None:
-            synced = bridge()
-            if any(synced.values()):
-                print(json.dumps({"bridge": synced}), flush=True)
+        try:
+            seen = inputs_signature(*cli.watched(data, root))
+            if seen != last_seen:  # a full pass only when an input changed
+                counts = pipeline.run(cli.sources(data, root))
+                last_seen = seen
+                if counts.collected or counts.rejected or not args.watch:
+                    print(counts.model_dump_json(), flush=True)
+            if bridge is not None:
+                synced = bridge()
+                if any(synced.values()):
+                    print(json.dumps({"bridge": synced}), flush=True)
+        except Exception as exc:
+            if not args.watch:
+                raise
+            # A watcher outlives one bad input: report the class only (no content) and retry
+            # the whole pass at the next poll, since last_seen was not advanced.
+            print(json.dumps({"error": type(exc).__name__}), file=sys.stderr, flush=True)
         if not args.watch:
             return 0
-        time.sleep(args.poll_seconds)
+        try:
+            time.sleep(args.poll_seconds)
+        except KeyboardInterrupt:
+            return 0
 
 
 def inputs_signature(*paths: Path) -> tuple[tuple[str, int, int], ...]:

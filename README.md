@@ -20,6 +20,17 @@ Four security domains share one platform but never share data, credentials or ne
 
 ## Quick start
 
+Local trial on a workstation (WSL2 + Docker Desktop works), everything in one script:
+
+```bash
+scripts/jarvis-local.sh setup   # once: GPU check, local models, Whisper, sandbox images
+scripts/jarvis-local.sh up      # Ollama, deck + orchestrator, reel worker, context curation
+scripts/jarvis-local.sh e2e     # end-to-end test against the running stack
+scripts/jarvis-local.sh down
+```
+
+Server setup:
+
 ```bash
 uv sync                      # Python 3.12+, managed with uv
 uv run pytest                # unit and config tests
