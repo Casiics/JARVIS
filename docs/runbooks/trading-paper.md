@@ -104,6 +104,24 @@ python -m mod_trading research-gate --bars spy-daily.csv --signal idea.csv --ins
 
 It is accepted only if its Sharpe ratio beats the baseline's by at least 0.10 on the whole period and on the second half (out of sample), and its drawdown is at most 5 points worse. Exit code 0 means accepted, 1 rejected (with reasons), 2 an invalid signal (weights outside 0 to 1, bars without a weight). Buying and holding fails it, and so does the baseline itself; deterministic code decides, no model. An accepted signal still trades only through the normal order path.
 
+## Research lab: market researcher and model builder
+
+Research agents never write code and never trade. They work in the supervisor-worker loop (schema check, at most four attempts) and propose; plain code compiles, judges and records:
+
+1. The **market researcher** reads a brief of plain numbers (return, volatility, drawdown, trend, correlation per instrument) and proposes up to five hypotheses, each naming the price features it relies on.
+2. The **model builder** turns each hypothesis into a `SignalSpec` (`mod_trading.signals`): up to four conditions on `trend`, `momentum`, `drawdown` and `volatility` with windows and thresholds, plus a sizing rule (full or volatility target). Every feature uses only closes up to the bar it is computed on, so a spec cannot look ahead.
+3. Its Tier 0b check runs the research gate on the **research window** (first 60 % of the bars). A rejection goes back to the builder as numbers, for example `Sharpe 0.40 vs baseline 0.64`.
+4. A spec that passes is judged once on the **holdout** (last 40 %), which no worker ever sees, neither in the brief nor in feedback. Every earlier holdout test of the same instrument raises the margin over the baseline (0.05 Sharpe per doubling), so many attempts cannot turn luck into a candidate.
+5. Every spec lands in `<data-dir>/research/ledger.jsonl` with its fingerprint and verdicts; the same rule is not tested twice. Ledger writes are audited with hashes only.
+6. A spec that passes the holdout becomes a **paper candidate** in `<data-dir>/research/candidates/` (spec JSON and a `ts,weight` file for `research-gate`). Putting it on the paper account stays a human step.
+
+```bash
+uv run python -m mod_trading.lab --data-dir /var/lib/jarvis/trading run --bars spy-daily.csv qqq-daily.csv --ollama-url http://localhost:11434
+uv run python -m mod_trading.lab --data-dir /var/lib/jarvis/trading ledger
+```
+
+The lab runs on local models with a cloud budget of zero. Market prices are public, so a later switch to a cloud model class is a routing decision, not a privacy one.
+
 ## Live market data
 
 `paper-live` trades the same paper account on live 1-minute bars instead of a CSV:
