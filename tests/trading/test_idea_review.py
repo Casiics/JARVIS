@@ -17,8 +17,8 @@ from jarvis_core.orchestrator.state_machine import TaskMachine, TaskState
 from jarvis_core.router.budget import CircuitBreaker, InMemorySpendLedger
 from jarvis_core.router.gateway import InferenceGateway
 from mod_trading.inbox import TradingInbox
-from mod_trading.review import AssessmentStore, IdeaReviewer, Verdict, review_open_ideas
 from tests.orchestrator.fakes import RecordingModel, ScriptedRuntime, claims
+from trading_agents.review import AssessmentStore, IdeaReviewer, Verdict, review_open_ideas
 
 GOOD = (
     '{"verdict": "research", "instruments": ["SPY"], '

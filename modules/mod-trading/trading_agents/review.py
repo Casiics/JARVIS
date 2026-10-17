@@ -1,4 +1,4 @@
-"""Review the trading inbox with the supervisor-worker loop.
+"""Review the trading inbox with the supervisor-worker loop (`trading_agents`).
 
 Ideas arrive from content (reels) as tainted notes. For each open idea a local worker writes
 a typed assessment, Tier 0b checks it deterministically, and a local supervisor does the
