@@ -123,7 +123,7 @@ media are the noisiest material.
 
 `max_age_days` ages a category: entries not updated for that long stay in the store but no longer
 appear in `search`, `export` or agent packs (`--include-stale` shows them anyway). A merge or a
-new snapshot counts as an update. Shipped: content `market-notes` 30 days, trading `earnings` 45.
+new snapshot counts as an update. Shipped: content `market-notes` 30 days, trading `earnings` 45 and `market-regime` 7.
 Agent runs get the same filter with `fresh(store.entries(), config, now)` before
 `select_context`.
 

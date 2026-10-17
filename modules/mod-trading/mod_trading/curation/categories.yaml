@@ -11,6 +11,7 @@ categories:
     keywords: [regime, volatility, trend, average]
     min_signal: 0.5
     auto_store_at: 0.85
+    max_age_days: 7  # a snapshot older than a week means the bars stopped updating
     max_classification: private
   - name: index-etf
     description: QQQ, SPY, IWM and index strategies
