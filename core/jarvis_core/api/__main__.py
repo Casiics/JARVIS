@@ -14,8 +14,10 @@ from __future__ import annotations
 import argparse
 import os
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import uvicorn
 
@@ -31,9 +33,11 @@ from jarvis_core.contracts.audit import AuditLogEntry
 from jarvis_core.contracts.classification import Domain
 from jarvis_core.contracts.task_token import load_signing_key, public_key_hex
 from jarvis_core.management.delegation import build_delegation
+from jarvis_core.management.improvement import build_improvement, run_improvement_forever
 from jarvis_core.orchestrator.anchors import AnchorBook
 from jarvis_core.orchestrator.service import Orchestrator, TaskTokenIssuer, run_forever
 from jarvis_core.secrets.provider import SecretAccessError, UnpackedSopsProvider
+from jarvis_core.selfimprove.skills import SkillProposal, propose_skill
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -71,6 +75,17 @@ def main(argv: list[str] | None = None) -> None:
         help="local models for the management agents",
     )
     parser.add_argument("--agent-runtime", choices=["auto", "hermes", "gateway"], default="auto")
+    parser.add_argument(
+        "--improve-hours",
+        type=float,
+        default=6.0,
+        help="how often the improvement agent reviews the task history (0 disables)",
+    )
+    parser.add_argument(
+        "--skills-repo",
+        default=None,
+        help="owner/name: let the improvement agent open skill PRs through the git gateway",
+    )
     args = parser.parse_args(argv)
 
     secrets = UnpackedSopsProvider(Domain.CORE, root=args.secrets_root)
@@ -125,6 +140,22 @@ def main(argv: list[str] | None = None) -> None:
         reels=lambda url: desk.submit(url)[0].task_id,
     )
 
+    if args.improve_hours > 0:
+        improver = build_improvement(
+            orchestrator.tasks,
+            data_dir=args.data_dir,
+            ollama_url=args.ollama_url,
+            audit=audit,
+            runtime_choice=args.agent_runtime,
+            propose=_skill_proposer(args.skills_repo, args.secrets_root, audit),
+        )
+        threading.Thread(
+            target=run_improvement_forever,
+            args=(improver, args.improve_hours * 3600),
+            kwargs={"on_error": lambda exc: print(f"improvement: {type(exc).__name__}")},
+            daemon=True,
+        ).start()
+
     # Own mailbox root: the reel desk consumes every letter in the main content-to-core box.
     deps.context_reviews = ContextReviewDesk(
         Mailbox(args.boundary_dir / "context-review", Domain.CORE),
@@ -162,6 +193,38 @@ def _audit_store(args: argparse.Namespace) -> AuditStore:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     print(f"audit log: {path} (hash-chained, checked on every start)")
     return FileAuditStore(path)
+
+
+def _skill_proposer(
+    repo: str | None, secrets_root: Path, audit: Callable[[AuditLogEntry], None]
+) -> Callable[[SkillProposal, UUID], object] | None:
+    """Skill PRs through the git gateway, or None when no repository is configured."""
+    if repo is None:
+        return None
+    from jarvis_core.gitgateway.gateway import GitGateway
+    from jarvis_core.gitgateway.github import GitHubApp, GitHubPullRequests, Repository
+
+    owner, _, name = repo.partition("/")
+    repository = Repository(owner, name)
+
+    def propose(skill: SkillProposal, task_id: UUID) -> object:
+        # Read the GitHub App credentials per proposal, so the agent never holds them.
+        secrets = UnpackedSopsProvider(Domain.CORE, root=secrets_root)
+        app = GitHubApp(
+            app_id=secrets.get("core/github_app_id"),
+            installation_id=secrets.get("core/github_app_installation_id"),
+            private_key_pem=secrets.get("core/github_app_private_key").encode(),
+            repository=repository,
+        )
+        gateway = GitGateway(
+            remote=repository.https_url,
+            pulls=GitHubPullRequests(repository),
+            audit=audit,
+            token=app.installation_token,
+        )
+        return propose_skill(gateway, skill, task_id=task_id)
+
+    return propose
 
 
 if __name__ == "__main__":
